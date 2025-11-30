@@ -1,0 +1,42 @@
+# Docker Compose for Production
+# Uses absolute paths for persistent storage on Linux server
+# Copy this to docker-compose.yml and adjust paths as needed
+
+services:
+  fronius-inverters:
+    build: .
+    container_name: fronius-inverters
+    restart: unless-stopped
+    command: ["python", "fronius_modbus_mqtt.py", "-d", "inverter"]
+    volumes:
+      - /docker-storage/pv-stack/fronius-inverters/config:/app/config:ro
+      - /docker-storage/pv-stack/fronius-inverters/data:/app/data
+      - /docker-storage/pv-stack/fronius-inverters/logs:/app/logs
+    environment:
+      - TZ=Europe/Bucharest
+    networks:
+      - fronius-net
+    labels:
+      - "com.docker.compose.project=pv-stack"
+      - "io.portainer.accesscontrol.teams=pv-stack"
+
+  fronius-meter:
+    build: .
+    container_name: fronius-meter
+    restart: unless-stopped
+    command: ["python", "fronius_modbus_mqtt.py", "-d", "meter"]
+    volumes:
+      - /docker-storage/pv-stack/fronius-meter/config:/app/config:ro
+      - /docker-storage/pv-stack/fronius-meter/data:/app/data
+      - /docker-storage/pv-stack/fronius-meter/logs:/app/logs
+    environment:
+      - TZ=Europe/Bucharest
+    networks:
+      - fronius-net
+    labels:
+      - "com.docker.compose.project=pv-stack"
+      - "io.portainer.accesscontrol.teams=pv-stack"
+
+networks:
+  fronius-net:
+    driver: bridge

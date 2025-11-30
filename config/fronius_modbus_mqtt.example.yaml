@@ -1,0 +1,51 @@
+# Fronius Modbus MQTT Configuration
+# ==================================
+# Copy this file to fronius_modbus_mqtt.yaml and adjust values
+
+general:
+  log_level: INFO              # DEBUG, INFO, WARNING, ERROR
+  log_file: "/app/logs/fronius.log"  # Log file path (becomes inverter.log or meter.log)
+  poll_interval: 5             # Seconds between polling cycles
+  publish_mode: changed        # 'changed' = only publish changes, 'all' = always publish
+
+# Modbus TCP Connection
+# ---------------------
+modbus:
+  host: 192.168.1.100          # Fronius DataManager IP address
+  port: 502                    # Modbus TCP port (standard)
+  timeout: 3                   # Connection timeout in seconds (Fronius needs 2-3s)
+  retry_attempts: 3            # Retries on read failure
+  retry_delay: 0.5             # Seconds between retries
+
+# Device Configuration
+# --------------------
+# Single poller thread cycles through all devices sequentially
+devices:
+  inverters: [1]               # Inverter Modbus IDs (typically 1-4)
+  meters: [240]                # Smart Meter Modbus ID (typically 240)
+  meter_poll_interval: 2       # (unused - kept for compatibility)
+  inverter_poll_delay: 2       # Delay between device reads in seconds
+  inverter_read_delay_ms: 500  # Delay between register block reads within same inverter (500ms)
+
+# MQTT Configuration
+# ------------------
+mqtt:
+  enabled: true
+  broker: 192.168.1.100        # MQTT broker address
+  port: 1883                   # MQTT port
+  username: ""                 # Leave empty if no auth
+  password: ""
+  topic_prefix: fronius        # Topics: fronius/inverter/{id}/...
+  retain: true                 # Retain last value on broker
+  qos: 0                       # QoS level (0, 1, or 2)
+
+# InfluxDB Configuration (Optional)
+# ----------------------------------
+influxdb:
+  enabled: false
+  url: http://localhost:8086
+  token: ""                    # InfluxDB API token
+  org: ""                      # Organization name
+  bucket: fronius              # Bucket name
+  write_interval: 5            # Minimum seconds between writes per device
+  publish_mode: changed        # 'changed' = only publish changes, 'all' = always publish

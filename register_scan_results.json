@@ -1,0 +1,47 @@
+{
+  "device_1": {
+    "device_id": 1,
+    "scan_time": "2025-11-29T13:50:33.935491",
+    "registers": {},
+    "raw_blocks": {},
+    "errors": [
+      "Failed to read identification: ExceptionResponse(dev_id=1, transaction_id=1, address=0, count=0, bits=[], registers=[], status=1)"
+    ]
+  },
+  "device_2": {
+    "device_id": 2,
+    "scan_time": "2025-11-29T13:50:40.688251",
+    "registers": {},
+    "raw_blocks": {},
+    "errors": [
+      "Failed to read identification: ExceptionResponse(dev_id=2, transaction_id=1, address=0, count=0, bits=[], registers=[], status=1)"
+    ]
+  },
+  "device_3": {
+    "device_id": 3,
+    "scan_time": "2025-11-29T13:50:45.935738",
+    "registers": {},
+    "raw_blocks": {},
+    "errors": [
+      "Failed to read identification: ExceptionResponse(dev_id=3, transaction_id=1, address=0, count=0, bits=[], registers=[], status=1)"
+    ]
+  },
+  "device_4": {
+    "device_id": 4,
+    "scan_time": "2025-11-29T13:50:49.272368",
+    "registers": {},
+    "raw_blocks": {},
+    "errors": [
+      "Failed to read identification: ExceptionResponse(dev_id=4, transaction_id=1, address=0, count=0, bits=[], registers=[], status=1)"
+    ]
+  },
+  "device_240": {
+    "device_id": 240,
+    "scan_time": "2025-11-29T13:50:52.222086",
+    "registers": {},
+    "raw_blocks": {},
+    "errors": [
+      "Failed to read identification: ExceptionResponse(dev_id=240, transaction_id=1, address=0, count=0, bits=[], registers=[], status=1)"
+    ]
+  }
+}

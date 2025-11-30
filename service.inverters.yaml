@@ -1,0 +1,142 @@
+name: fronius_inverters
+description: "Fronius Inverters to MQTT/InfluxDB Bridge via Modbus TCP"
+
+# Dependencies with variable mappings
+dependencies:
+  - name: mosquitto
+    variables:
+      FRONIUS_INV_MQTT_BROKER: "${HOST}"
+      FRONIUS_INV_MQTT_PORT: "${PORT}"
+  - name: influxdb
+    variables:
+      FRONIUS_INV_INFLUXDB_URL: "http://${HOST}:${PORT}"
+
+variables:
+  # Modbus settings
+  FRONIUS_INV_MODBUS_HOST:
+    default: "192.168.1.100"
+    description: "Fronius DataManager IP address"
+    prompt: true
+  FRONIUS_INV_MODBUS_PORT:
+    default: "502"
+    description: "Modbus TCP port"
+  FRONIUS_INV_MODBUS_TIMEOUT:
+    default: "3"
+    description: "Connection timeout in seconds"
+
+  # Device IDs
+  FRONIUS_INV_INVERTER_IDS:
+    default: "1"
+    description: "Inverter Modbus IDs (comma-separated, e.g., 1,2,3,4)"
+    prompt: true
+
+  # MQTT settings
+  FRONIUS_INV_MQTT_ENABLED:
+    default: "true"
+    description: "Enable MQTT publishing"
+  FRONIUS_INV_MQTT_BROKER:
+    default: "localhost"
+    description: "MQTT broker address"
+    prompt: true
+  FRONIUS_INV_MQTT_PORT:
+    default: "1883"
+    description: "MQTT broker port"
+    prompt: true
+  FRONIUS_INV_MQTT_USERNAME:
+    default: ""
+    description: "MQTT username (leave empty if not required)"
+    prompt: true
+  FRONIUS_INV_MQTT_PASSWORD:
+    default: ""
+    description: "MQTT password"
+    prompt: true
+  FRONIUS_INV_MQTT_PREFIX:
+    default: "fronius"
+    description: "MQTT topic prefix"
+
+  # InfluxDB settings
+  FRONIUS_INV_INFLUXDB_ENABLED:
+    default: "false"
+    description: "Enable InfluxDB integration"
+    prompt: true
+  FRONIUS_INV_INFLUXDB_URL:
+    default: "http://localhost:8086"
+    description: "InfluxDB URL"
+    prompt: true
+  FRONIUS_INV_INFLUXDB_TOKEN:
+    default: ""
+    description: "InfluxDB API token"
+    prompt: true
+  FRONIUS_INV_INFLUXDB_ORG:
+    default: "homelab"
+    description: "InfluxDB organization"
+    prompt: true
+  FRONIUS_INV_INFLUXDB_BUCKET:
+    default: "fronius"
+    description: "InfluxDB bucket"
+    prompt: true
+
+  # General settings
+  FRONIUS_INV_LOG_LEVEL:
+    default: "INFO"
+    description: "Log level: DEBUG, INFO, WARNING, ERROR"
+
+# Copy config files (same folder now)
+copy_files:
+  - src: config/registers.json
+    dest: config/registers.json
+  - src: config/FroniusEventFlags.json
+    dest: config/FroniusEventFlags.json
+
+# Hooks for pre/post deployment actions
+hooks:
+  pre_deploy:
+    - "echo 'Preparing Fronius Inverters service...'"
+    - "mkdir -p ${SERVICE_DATA}/data ${SERVICE_DATA}/logs"
+  post_deploy:
+    - "echo 'Fronius Inverters service deployed successfully'"
+    - "docker logs ${CONTAINER_NAME} --tail 5 2>/dev/null || true"
+
+compose: |
+  fronius-inverters:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: fronius-modbus-mqtt:latest
+    container_name: fronius-inverters
+    restart: unless-stopped
+    command: ["python", "fronius_modbus_mqtt.py", "-d", "inverter"]
+    environment:
+      - TZ=${TZ}
+      - MODBUS_HOST=${FRONIUS_INV_MODBUS_HOST}
+      - MODBUS_PORT=${FRONIUS_INV_MODBUS_PORT}
+      - MODBUS_TIMEOUT=${FRONIUS_INV_MODBUS_TIMEOUT}
+      - INVERTER_IDS=${FRONIUS_INV_INVERTER_IDS}
+      - METER_IDS=
+      - MQTT_ENABLED=${FRONIUS_INV_MQTT_ENABLED}
+      - MQTT_BROKER=${FRONIUS_INV_MQTT_BROKER}
+      - MQTT_PORT=${FRONIUS_INV_MQTT_PORT}
+      - MQTT_USERNAME=${FRONIUS_INV_MQTT_USERNAME}
+      - MQTT_PASSWORD=${FRONIUS_INV_MQTT_PASSWORD}
+      - MQTT_PREFIX=${FRONIUS_INV_MQTT_PREFIX}
+      - INFLUXDB_ENABLED=${FRONIUS_INV_INFLUXDB_ENABLED}
+      - INFLUXDB_URL=${FRONIUS_INV_INFLUXDB_URL}
+      - INFLUXDB_TOKEN=${FRONIUS_INV_INFLUXDB_TOKEN}
+      - INFLUXDB_ORG=${FRONIUS_INV_INFLUXDB_ORG}
+      - INFLUXDB_BUCKET=${FRONIUS_INV_INFLUXDB_BUCKET}
+      - LOG_LEVEL=${FRONIUS_INV_LOG_LEVEL}
+    volumes:
+      - ${DOCKER_ROOT}/fronius-inverters/config:/app/config:ro
+      - ${DOCKER_ROOT}/fronius-inverters/data:/app/data
+      - ${DOCKER_ROOT}/fronius-inverters/logs:/app/logs
+    healthcheck:
+      test: ["CMD", "pgrep", "-f", "fronius_modbus_mqtt.py"]
+      interval: 60s
+      timeout: 10s
+      start_period: 30s
+      retries: 3
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
