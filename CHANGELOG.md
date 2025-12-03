@@ -1,0 +1,144 @@
+# Changelog
+
+All notable changes to Fronius Modbus MQTT will be documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [1.2.0] - 2024-12-03
+
+### Added
+- **Night/Sleep Mode Detection**
+  - Detects when Fronius DataManager enters sleep mode at night
+  - Ping check before attempting Modbus connection
+  - Configurable night hours (default: 21:00-06:00)
+  - Reduced polling interval during sleep mode (default: 5 minutes)
+  - Automatic recovery when DataManager wakes up
+  - New configuration options:
+    - `NIGHT_MODE_ENABLED` - Enable/disable night mode detection
+    - `NIGHT_POLL_INTERVAL` - Polling interval during sleep (seconds)
+    - `NIGHT_START_HOUR` / `NIGHT_END_HOUR` - Night time window
+    - `PING_CHECK_ENABLED` - Check host availability before connect
+    - `CONSECUTIVE_FAILURES_FOR_SLEEP` - Failures before entering sleep
+
+### Changed
+- **Healthcheck Updated for Sleep Mode**
+  - Accepts 'sleep' status as healthy (container stays running at night)
+  - Extended max age to 10 minutes during sleep mode
+  - Reports sleep mode reason (night time or DataManager unavailable)
+- **Health File Format**
+  - Added `sleep_mode:True/False` field
+  - Added `night_time:True/False` field
+
+## [1.1.0] - 2024-12-03
+
+### Added
+- **Docker Healthcheck**
+  - New `healthcheck.py` script for container health monitoring
+  - Checks Modbus connectivity and MQTT connection status
+  - Writes health status to `/tmp/fronius_health` every 30 seconds
+  - `HEALTHCHECK` directive added to Dockerfile
+- **MPPT String Data (Model 160)**
+  - Per-string DC voltage, current, and power readings
+  - Per-string DC energy (lifetime)
+  - Per-string temperature monitoring
+  - Publishes to MQTT: `fronius/inverter/{serial}/mppt/string{n}/DCA|DCV|DCW|DCWH|Tmp`
+  - Writes to InfluxDB: `string{n}_current`, `string{n}_voltage`, `string{n}_power`, `string{n}_energy`
+- **Immediate Controls (Model 123)**
+  - Connection status monitoring
+  - Power limit percentage reading
+  - Power factor settings
+  - Reactive power (VAR) settings
+  - Read every 60 seconds (configurable via `CONTROLS_POLL_INTERVAL`)
+- **Storage Support Detection (Model 124)**
+  - Automatically detects inverters with battery storage
+  - Reads storage data if available (charge state, battery voltage, etc.)
+- **Retry Logic**
+  - Configurable retry attempts for Modbus reads
+  - Exponential backoff on connection failures
+  - Automatic reconnection after unit ID changes
+
+### Changed
+- **Single DevicePoller Thread**
+  - Merged inverter and meter polling into single thread
+  - Reduces Modbus TCP connection conflicts on DataManager
+  - More reliable polling on systems with multiple devices
+- **Connection Reset on Unit ID Change**
+  - Forces TCP reconnection when switching between devices
+  - Prevents stale data from DataManager's internal buffer
+
+### Fixed
+- Stale MPPT data when reading after main registers
+- Model mismatch errors due to DataManager buffering
+
+## [1.0.0] - 2024-11-30
+
+### Added
+- **Core Features**
+  - SunSpec protocol support with automatic scale factor handling
+  - Multi-device support (multiple inverters + smart meter)
+  - MQTT publishing with change detection
+  - InfluxDB integration with batching and rate limiting
+- **Device Support**
+  - Inverter Models 101/102/103 (Single/Split/Three Phase)
+  - Meter Models 201-204 (Single/Split/Three Phase)
+  - Common Block Model 1 (device identification)
+- **Configuration**
+  - YAML configuration file support
+  - Environment variable override for all settings
+  - Docker-ready with volume mounts
+- **Publishing Modes**
+  - `changed` - Only publish when values change (reduces traffic)
+  - `all` - Publish all values at each interval
+- **Event Parsing**
+  - Decode Fronius vendor event flags
+  - Human-readable event descriptions
+  - Per-inverter-type event filtering (Symo, SnapINverter, etc.)
+- **Device Cache**
+  - Persistent device information cache
+  - Reduces discovery time on restart
+- **Docker Support**
+  - Multi-stage Dockerfile
+  - Separate containers for inverters/meters (service variants)
+  - Health check integration
+- **Integration**
+  - docker-setup template integration
+  - Three variants: `fronius`, `fronius:inverters`, `fronius:meter`
+
+### Architecture
+- Modular Python package structure
+- Thread-safe Modbus connection with locking
+- Configurable logging with file output
+- Graceful shutdown handling
+
+---
+
+## Version History Summary
+
+| Version | Date | Highlights |
+|---------|------|------------|
+| 1.2.0 | 2024-12-03 | Night/sleep mode detection, ping check, improved healthcheck |
+| 1.1.0 | 2024-12-03 | MPPT string data, Model 123 controls, single poller thread |
+| 1.0.0 | 2024-11-30 | Initial release with SunSpec protocol, MQTT, InfluxDB |
+
+---
+
+## SunSpec Models Supported
+
+| Model | Description | Version |
+|-------|-------------|---------|
+| 1 | Common Block | 1.0.0 |
+| 101-103 | Inverter (Single/Split/Three Phase) | 1.0.0 |
+| 123 | Immediate Controls | 1.1.0 |
+| 124 | Basic Storage Controls | 1.1.0 |
+| 160 | MPPT (Multiple Power Point Tracker) | 1.1.0 |
+| 201-204 | Meter (Single/Split/Three Phase) | 1.0.0 |
+
+## Tested Devices
+
+| Device | Model | Version Tested |
+|--------|-------|----------------|
+| Fronius Symo 17.5-3-M | Inverter | 1.0.0 |
+| Fronius Symo Advanced 17.5-3-M | Inverter | 1.1.0 |
+| Fronius Symo Advanced 20.0-3-M | Inverter | 1.1.0 |
+| Fronius Smart Meter TS 5kA-3 | Meter | 1.0.0 |

@@ -4,11 +4,15 @@ Architecture:
 - MeterPoller: Thread that reads meter, publishes to MQTT, sleeps, repeats
 - InverterPoller: Thread that cycles through inverters one by one with pauses
 - Single shared Modbus connection
+- Night/Sleep mode detection for Fronius DataManager
 """
 
 import time
 import logging
 import threading
+import subprocess
+import platform
+from datetime import datetime
 from typing import Dict, List, Optional, Callable
 
 from pymodbus.client import ModbusTcpClient
@@ -20,6 +24,56 @@ from .logging_setup import get_logger
 
 # Suppress pymodbus exception logging
 logging.getLogger("pymodbus").setLevel(logging.CRITICAL)
+
+
+def ping_host(host: str, timeout: int = 2) -> bool:
+    """
+    Check if host is reachable via ICMP ping.
+
+    Args:
+        host: Hostname or IP address
+        timeout: Timeout in seconds
+
+    Returns:
+        True if host responds to ping
+    """
+    try:
+        # Platform-specific ping command
+        if platform.system().lower() == 'windows':
+            cmd = ['ping', '-n', '1', '-w', str(timeout * 1000), host]
+        else:
+            cmd = ['ping', '-c', '1', '-W', str(timeout), host]
+
+        result = subprocess.run(
+            cmd,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=timeout + 1
+        )
+        return result.returncode == 0
+    except (subprocess.TimeoutExpired, Exception):
+        return False
+
+
+def is_night_time(start_hour: int = 21, end_hour: int = 6) -> bool:
+    """
+    Check if current time is within night hours.
+
+    Args:
+        start_hour: Hour when night starts (e.g., 21 for 9 PM)
+        end_hour: Hour when night ends (e.g., 6 for 6 AM)
+
+    Returns:
+        True if current time is night time
+    """
+    current_hour = datetime.now().hour
+
+    if start_hour > end_hour:
+        # Night spans midnight (e.g., 21:00 - 06:00)
+        return current_hour >= start_hour or current_hour < end_hour
+    else:
+        # Night within same day (e.g., 23:00 - 04:00)
+        return start_hour <= current_hour < end_hour
 
 
 class ModbusConnection:
@@ -171,6 +225,11 @@ class DevicePoller(threading.Thread):
 
     Uses a single Modbus connection to avoid conflicts on Fronius DataManager
     which cannot handle multiple simultaneous TCP connections properly.
+
+    Features:
+    - Night/sleep mode detection when DataManager is unavailable
+    - Ping check before attempting Modbus connection
+    - Exponential backoff during night hours
     """
 
     ACTIVE_STATUS_CODES = [4, 5]
@@ -197,6 +256,12 @@ class DevicePoller(threading.Thread):
 
         # Track last controls read time per inverter
         self._last_controls_read: Dict[int, float] = {}
+
+        # Night/sleep mode tracking
+        self._consecutive_failures = 0
+        self._in_sleep_mode = False
+        self._last_successful_poll = time.time()
+        self._sleep_mode_start = None
 
     def _poll_inverter(self, device_info: Dict, max_retries: int = 3) -> bool:
         """Poll a single inverter with retry on failure."""
@@ -547,6 +612,56 @@ class DevicePoller(threading.Thread):
         self.log.debug(f"Meter {unit_id}: published (W={data.get('power_total', 0)})")
         return True
 
+    def _check_host_available(self) -> bool:
+        """Check if DataManager is reachable via ping."""
+        if not self.modbus_config.ping_check_enabled:
+            return True
+
+        return ping_host(self.modbus_config.host, timeout=2)
+
+    def _is_night_time(self) -> bool:
+        """Check if current time is within configured night hours."""
+        if not self.modbus_config.night_mode_enabled:
+            return False
+
+        return is_night_time(
+            self.modbus_config.night_start_hour,
+            self.modbus_config.night_end_hour
+        )
+
+    def _enter_sleep_mode(self, reason: str):
+        """Enter sleep mode - reduce polling frequency."""
+        if not self._in_sleep_mode:
+            self._in_sleep_mode = True
+            self._sleep_mode_start = time.time()
+            self.log.info(f"DevicePoller: Entering sleep mode - {reason}")
+            self.log.info(f"DevicePoller: Will poll every {self.modbus_config.night_poll_interval}s")
+
+    def _exit_sleep_mode(self):
+        """Exit sleep mode - resume normal polling."""
+        if self._in_sleep_mode:
+            duration = time.time() - self._sleep_mode_start if self._sleep_mode_start else 0
+            self.log.info(f"DevicePoller: Exiting sleep mode after {int(duration)}s")
+            self._in_sleep_mode = False
+            self._sleep_mode_start = None
+            self._consecutive_failures = 0
+
+    def _get_poll_interval(self) -> float:
+        """Get current polling interval based on mode."""
+        if self._in_sleep_mode:
+            return self.modbus_config.night_poll_interval
+        return self.poll_delay
+
+    def get_status(self) -> Dict:
+        """Get current poller status for health reporting."""
+        return {
+            'in_sleep_mode': self._in_sleep_mode,
+            'consecutive_failures': self._consecutive_failures,
+            'last_successful_poll': self._last_successful_poll,
+            'is_night_time': self._is_night_time(),
+            'connected': self.connection.connected if self.connection else False
+        }
+
     def run(self):
         self.running = True
         inv_ids = [inv['device_id'] for inv in self.inverters]
@@ -554,25 +669,73 @@ class DevicePoller(threading.Thread):
         self.log.info(f"DevicePoller: started for inverters {inv_ids}, meters {meter_ids}")
         self.log.info(f"DevicePoller: {self.poll_delay}s delay between devices")
 
-        # Connect
-        if not self.connection.connect():
-            self.log.error("DevicePoller: Failed to connect to Modbus")
-            return
+        if self.modbus_config.night_mode_enabled:
+            self.log.info(f"DevicePoller: Night mode enabled ({self.modbus_config.night_start_hour}:00-{self.modbus_config.night_end_hour}:00)")
 
         while self.running:
+            # Check if host is available (ping check)
+            if self.modbus_config.ping_check_enabled:
+                if not self._check_host_available():
+                    if self._is_night_time():
+                        self._enter_sleep_mode("DataManager not responding (night time)")
+                    else:
+                        self._consecutive_failures += 1
+                        if self._consecutive_failures >= self.modbus_config.consecutive_failures_for_sleep:
+                            self._enter_sleep_mode(f"DataManager not responding ({self._consecutive_failures} failures)")
+
+                    # Sleep and retry
+                    time.sleep(self._get_poll_interval())
+                    continue
+
+            # Try to connect if not connected
+            if not self.connection.connected:
+                if not self.connection.connect():
+                    self._consecutive_failures += 1
+                    if self._consecutive_failures >= self.modbus_config.consecutive_failures_for_sleep:
+                        self._enter_sleep_mode(f"Modbus connection failed ({self._consecutive_failures} failures)")
+                    time.sleep(self._get_poll_interval())
+                    continue
+
+            # Poll all devices
+            poll_success = False
+
             # Poll all inverters
             for device_info in self.inverters:
                 if not self.running:
                     break
-                self._poll_inverter(device_info)
+                if self._poll_inverter(device_info):
+                    poll_success = True
                 time.sleep(self.poll_delay)
 
             # Poll all meters
             for device_info in self.meters:
                 if not self.running:
                     break
-                self._poll_meter(device_info)
+                if self._poll_meter(device_info):
+                    poll_success = True
                 time.sleep(self.poll_delay)
+
+            # Update status based on poll results
+            if poll_success:
+                self._last_successful_poll = time.time()
+                self._consecutive_failures = 0
+                if self._in_sleep_mode:
+                    self._exit_sleep_mode()
+            else:
+                self._consecutive_failures += 1
+                self.log.debug(f"DevicePoller: Poll cycle failed ({self._consecutive_failures} consecutive)")
+
+                # Check if we should enter sleep mode
+                if self._consecutive_failures >= self.modbus_config.consecutive_failures_for_sleep:
+                    if self._is_night_time():
+                        self._enter_sleep_mode("No data received (night time)")
+                    else:
+                        self._enter_sleep_mode(f"No data after {self._consecutive_failures} attempts")
+
+            # Sleep before next poll cycle
+            if self._in_sleep_mode:
+                # In sleep mode, use longer interval
+                time.sleep(self._get_poll_interval())
 
         self.connection.disconnect()
         self.log.info("DevicePoller: stopped")

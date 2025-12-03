@@ -16,6 +16,13 @@ modbus:
   timeout: 3                   # Connection timeout in seconds (Fronius needs 2-3s)
   retry_attempts: 3            # Retries on read failure
   retry_delay: 0.5             # Seconds between retries
+  # Night/Sleep Mode Settings (DataManager enters sleep mode at night)
+  night_mode_enabled: true     # Enable sleep mode detection
+  night_poll_interval: 300     # Poll interval during sleep mode (5 min)
+  night_start_hour: 21         # Night starts at 21:00
+  night_end_hour: 6            # Night ends at 06:00
+  ping_check_enabled: true     # Check if host responds to ping before connecting
+  consecutive_failures_for_sleep: 3  # Enter sleep mode after N consecutive failures
 
 # Device Configuration
 # --------------------
@@ -43,7 +50,7 @@ mqtt:
 # ----------------------------------
 influxdb:
   enabled: false
-  url: http://localhost:8086
+  url: http://influxdb:8086   # Use container name when running in Docker
   token: ""                    # InfluxDB API token
   org: ""                      # Organization name
   bucket: fronius              # Bucket name

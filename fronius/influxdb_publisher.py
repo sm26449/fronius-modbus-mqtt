@@ -187,6 +187,22 @@ class InfluxDBPublisher:
             if 'events' in data:
                 point = point.field("event_count", len(data['events']))
 
+            # MPPT string data (DC per string)
+            if 'mppt' in data and data['mppt']:
+                mppt = data['mppt']
+                if 'num_modules' in mppt:
+                    point = point.field("mppt_num_modules", int(mppt['num_modules']))
+                if 'modules' in mppt:
+                    for i, module in enumerate(mppt['modules'], 1):
+                        if module.get('dc_current') is not None:
+                            point = point.field(f"string{i}_current", float(module['dc_current']))
+                        if module.get('dc_voltage') is not None:
+                            point = point.field(f"string{i}_voltage", float(module['dc_voltage']))
+                        if module.get('dc_power') is not None:
+                            point = point.field(f"string{i}_power", float(module['dc_power']))
+                        if module.get('dc_energy') is not None:
+                            point = point.field(f"string{i}_energy", float(module['dc_energy']))
+
             self.write_api.write(bucket=self.config.bucket, record=point)
             self.writes_total += 1
 

@@ -352,16 +352,54 @@ python fronius_modbus_mqtt.py -d inverter
 python fronius_modbus_mqtt.py -d meter
 ```
 
+## Integration with docker-setup
+
+This project integrates seamlessly with [docker-setup](https://github.com/sm26449/docker-setup):
+
+```bash
+# Install using docker-setup
+cd /opt/docker-setup
+sudo ./install.sh
+# Select: Add Services -> fronius (or fronius:inverters, fronius:meter)
+```
+
+**Available variants:**
+- `fronius` - All devices (inverters + meter)
+- `fronius:inverters` - Inverters only
+- `fronius:meter` - Smart meter only
+
 ## Contributing
 
 Found a bug or have a feature request? Please open an issue on [GitHub Issues](https://github.com/sm26449/fronius-modbus-mqtt/issues).
 
 ## Author
 
-**Stefan M**
-- Email: sm26449@diysolar.ro
-- GitHub: [@sm26449](https://github.com/sm26449)
+**Stefan M** - [sm26449@diysolar.ro](mailto:sm26449@diysolar.ro)
 
 ## License
 
-MIT License - Free and open source. See [LICENSE](LICENSE) for details.
+MIT License - Free and open source software.
+
+Copyright (c) 2024 Stefan M <sm26449@diysolar.ro>
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+---
+
+**Disclaimer**: This software is provided "as is", without warranty of any kind. Use at your own risk when monitoring critical energy systems.

@@ -7,9 +7,15 @@ dependencies:
     variables:
       FRONIUS_MTR_MQTT_BROKER: "${HOST}"
       FRONIUS_MTR_MQTT_PORT: "${PORT}"
+    credentials:
+      FRONIUS_MTR_MQTT_USERNAME: "MQTT_USERNAME"
+      FRONIUS_MTR_MQTT_PASSWORD: "MQTT_PASSWORD"
   - name: influxdb
     variables:
       FRONIUS_MTR_INFLUXDB_URL: "http://${HOST}:${PORT}"
+    credentials:
+      FRONIUS_MTR_INFLUXDB_TOKEN: "DOCKER_INFLUXDB_INIT_ADMIN_TOKEN"
+      FRONIUS_MTR_INFLUXDB_ORG: "DOCKER_INFLUXDB_INIT_ORG"
 
 variables:
   # Modbus settings
@@ -35,8 +41,8 @@ variables:
     default: "true"
     description: "Enable MQTT publishing"
   FRONIUS_MTR_MQTT_BROKER:
-    default: "localhost"
-    description: "MQTT broker address"
+    default: "mosquitto"
+    description: "MQTT broker address (container name or IP)"
     prompt: true
   FRONIUS_MTR_MQTT_PORT:
     default: "1883"
@@ -60,8 +66,8 @@ variables:
     description: "Enable InfluxDB integration"
     prompt: true
   FRONIUS_MTR_INFLUXDB_URL:
-    default: "http://localhost:8086"
-    description: "InfluxDB URL"
+    default: "http://influxdb:8086"
+    description: "InfluxDB URL (container name or IP)"
     prompt: true
   FRONIUS_MTR_INFLUXDB_TOKEN:
     default: ""

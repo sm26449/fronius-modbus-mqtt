@@ -22,6 +22,9 @@ import argparse
 import atexit
 from pathlib import Path
 
+# Health file for Docker healthcheck
+HEALTH_FILE = '/tmp/fronius_health'
+
 from fronius import (
     __version__,
     setup_logging,
@@ -218,13 +221,57 @@ class FroniusModbusMQTT:
         self.log.info(f"Polling threads started (mode: {self.config.general.publish_mode})")
         self.log.info("Press Ctrl+C to stop")
 
+        health_interval = 30  # Write health file every 30 seconds
+        last_health_write = 0
+
         while self.running:
             try:
                 time.sleep(1)
+
+                # Write health file periodically
+                now = time.time()
+                if now - last_health_write >= health_interval:
+                    self._write_health_file()
+                    last_health_write = now
+
             except KeyboardInterrupt:
                 break
 
         self._shutdown()
+
+    def _write_health_file(self):
+        """Write health status to file for Docker healthcheck"""
+        try:
+            # Determine health status
+            mqtt_connected = self.mqtt_publisher.connected if self.mqtt_publisher else True
+
+            # Get poller status (includes sleep mode info)
+            poller_status = {}
+            if self.modbus_client and self.modbus_client.device_poller:
+                poller_status = self.modbus_client.device_poller.get_status()
+
+            in_sleep_mode = poller_status.get('in_sleep_mode', False)
+            modbus_connected = poller_status.get('connected', False)
+            is_night = poller_status.get('is_night_time', False)
+
+            # Status can be: healthy, sleep, unhealthy
+            # Sleep mode is considered healthy (DataManager is just unavailable at night)
+            if in_sleep_mode:
+                status = 'sleep'
+            elif modbus_connected:
+                status = 'healthy'
+            else:
+                status = 'unhealthy'
+
+            with open(HEALTH_FILE, 'w') as f:
+                f.write(f"{int(time.time())}\n")
+                f.write(f"{status}\n")
+                f.write(f"mqtt:{mqtt_connected}\n")
+                f.write(f"modbus:{modbus_connected}\n")
+                f.write(f"sleep_mode:{in_sleep_mode}\n")
+                f.write(f"night_time:{is_night}\n")
+        except Exception as e:
+            self.log.debug(f"Failed to write health file: {e}")
 
     def _shutdown(self):
         """Clean shutdown"""

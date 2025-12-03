@@ -64,6 +64,13 @@ class ModbusConfig:
     timeout: int = 3
     retry_attempts: int = 2
     retry_delay: float = 0.1
+    # Night/sleep mode settings
+    night_mode_enabled: bool = True          # Enable night mode detection
+    night_poll_interval: int = 300           # Poll every 5 min when in night mode
+    night_start_hour: int = 21               # Consider night after 21:00
+    night_end_hour: int = 6                  # Consider day after 06:00
+    ping_check_enabled: bool = True          # Check host availability with ping
+    consecutive_failures_for_sleep: int = 3  # Enter sleep mode after N failures
 
 
 @dataclass
@@ -192,7 +199,14 @@ class ConfigLoader:
             port=_env_get('MODBUS_PORT', mb.get('port', 502), int),
             timeout=_env_get('MODBUS_TIMEOUT', mb.get('timeout', 3), int),
             retry_attempts=_env_get('MODBUS_RETRY_ATTEMPTS', mb.get('retry_attempts', 2), int),
-            retry_delay=_env_get('MODBUS_RETRY_DELAY', mb.get('retry_delay', 0.1), float)
+            retry_delay=_env_get('MODBUS_RETRY_DELAY', mb.get('retry_delay', 0.1), float),
+            # Night mode settings
+            night_mode_enabled=_env_get('NIGHT_MODE_ENABLED', mb.get('night_mode_enabled', True), bool),
+            night_poll_interval=_env_get('NIGHT_POLL_INTERVAL', mb.get('night_poll_interval', 300), int),
+            night_start_hour=_env_get('NIGHT_START_HOUR', mb.get('night_start_hour', 21), int),
+            night_end_hour=_env_get('NIGHT_END_HOUR', mb.get('night_end_hour', 6), int),
+            ping_check_enabled=_env_get('PING_CHECK_ENABLED', mb.get('ping_check_enabled', True), bool),
+            consecutive_failures_for_sleep=_env_get('CONSECUTIVE_FAILURES_FOR_SLEEP', mb.get('consecutive_failures_for_sleep', 3), int)
         )
 
         # Parse devices settings
