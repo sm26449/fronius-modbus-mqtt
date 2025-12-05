@@ -5,6 +5,26 @@ All notable changes to Fronius Modbus MQTT will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.1] - 2024-12-04
+
+### Fixed
+- **Docker Ping Check Issue**
+  - Disabled `PING_CHECK_ENABLED` by default in Docker templates
+  - ICMP ping requires `NET_RAW` capability not available in standard containers
+  - Service would incorrectly enter sleep mode due to failed ping checks
+  - **Note**: To enable ping checks in Docker, use `network_mode: host` or add `cap_add: [NET_RAW]`
+
+### Added
+- **InfluxDB Bucket Auto-Creation**
+  - Added post_deploy hook to create InfluxDB bucket automatically
+  - Runs `influx bucket create` in stack's influxdb container
+  - Silently skips if bucket already exists
+
+### Changed
+- Updated service templates (`service.yaml`, `service.inverters.yaml`, `service.meter.yaml`)
+  - Added `PING_CHECK_ENABLED=false` to environment
+  - Added InfluxDB bucket creation hook in post_deploy
+
 ## [1.2.0] - 2024-12-03
 
 ### Added
@@ -117,6 +137,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 | Version | Date | Highlights |
 |---------|------|------------|
+| 1.2.1 | 2024-12-04 | Docker ping fix, InfluxDB bucket auto-creation |
 | 1.2.0 | 2024-12-03 | Night/sleep mode detection, ping check, improved healthcheck |
 | 1.1.0 | 2024-12-03 | MPPT string data, Model 123 controls, single poller thread |
 | 1.0.0 | 2024-11-30 | Initial release with SunSpec protocol, MQTT, InfluxDB |
