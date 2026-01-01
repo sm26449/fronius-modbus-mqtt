@@ -5,6 +5,32 @@ All notable changes to Fronius Modbus MQTT will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.2] - 2025-01-01
+
+### Fixed
+- **Modbus Register Validation**
+  - Added null check for register responses to prevent crashes
+  - Fixed index bounds check for `evt_vnd4` parsing (requires 50 registers, not 49)
+
+- **Error Handling & Logging**
+  - Added exception logging in `ping_host()` for easier debugging
+  - Changed retry failure logs from DEBUG to WARNING level for visibility
+  - Added logging for storage register read failures
+  - Changed health file write failure log from DEBUG to WARNING
+
+- **Cross-Platform Support**
+  - Fixed `ping_host()` for macOS (timeout in milliseconds vs seconds)
+  - Added platform-specific documentation for ping timeout behavior
+
+- **Shutdown Responsiveness**
+  - Replaced `time.sleep()` with `Event.wait()` for interruptible sleep
+  - Shutdown now responds immediately instead of waiting for poll interval (up to 5 min)
+
+### Changed
+- **Healthcheck Consistency**
+  - Standardized healthcheck across all service files to use `healthcheck.py`
+  - Previously `service.inverters.yaml` and `service.meter.yaml` used `pgrep`
+
 ## [1.2.1] - 2024-12-04
 
 ### Fixed
