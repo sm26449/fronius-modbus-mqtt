@@ -271,7 +271,7 @@ class FroniusModbusMQTT:
                 f.write(f"sleep_mode:{in_sleep_mode}\n")
                 f.write(f"night_time:{is_night}\n")
         except Exception as e:
-            self.log.debug(f"Failed to write health file: {e}")
+            self.log.warning(f"Failed to write health file: {e}")
 
     def _shutdown(self):
         """Clean shutdown"""

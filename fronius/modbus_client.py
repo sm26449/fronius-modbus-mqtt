@@ -39,9 +39,15 @@ def ping_host(host: str, timeout: int = 2) -> bool:
     """
     try:
         # Platform-specific ping command
-        if platform.system().lower() == 'windows':
+        # Windows: -w timeout in milliseconds
+        # macOS: -W timeout in milliseconds
+        # Linux: -W timeout in seconds
+        system = platform.system().lower()
+        if system == 'windows':
             cmd = ['ping', '-n', '1', '-w', str(timeout * 1000), host]
-        else:
+        elif system == 'darwin':  # macOS
+            cmd = ['ping', '-c', '1', '-W', str(timeout * 1000), host]
+        else:  # Linux and other Unix-like systems
             cmd = ['ping', '-c', '1', '-W', str(timeout), host]
 
         result = subprocess.run(
@@ -253,6 +259,7 @@ class DevicePoller(threading.Thread):
         self.publish_callback = publish_callback
         self.log = get_logger()
         self.running = False
+        self._stop_event = threading.Event()
 
         # Single connection for all devices
         self.connection = ModbusConnection(modbus_config, parser)
@@ -689,7 +696,7 @@ class DevicePoller(threading.Thread):
                             self._enter_sleep_mode(f"DataManager not responding ({self._consecutive_failures} failures)")
 
                     # Sleep and retry
-                    time.sleep(self._get_poll_interval())
+                    self._stop_event.wait(self._get_poll_interval())
                     continue
 
             # Try to connect if not connected
@@ -698,7 +705,7 @@ class DevicePoller(threading.Thread):
                     self._consecutive_failures += 1
                     if self._consecutive_failures >= self.modbus_config.consecutive_failures_for_sleep:
                         self._enter_sleep_mode(f"Modbus connection failed ({self._consecutive_failures} failures)")
-                    time.sleep(self._get_poll_interval())
+                    self._stop_event.wait(self._get_poll_interval())
                     continue
 
             # Poll all devices
@@ -738,13 +745,14 @@ class DevicePoller(threading.Thread):
                         self._enter_sleep_mode(f"No data after {self._consecutive_failures} attempts")
 
             # Sleep before next poll cycle (always sleep, just different intervals)
-            time.sleep(self._get_poll_interval())
+            self._stop_event.wait(self._get_poll_interval())
 
         self.connection.disconnect()
         self.log.info("DevicePoller: stopped")
 
     def stop(self):
         self.running = False
+        self._stop_event.set()  # Interrupt sleep immediately
 
 
 # Keep old class names for backward compatibility
