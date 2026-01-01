@@ -261,7 +261,7 @@ class RegisterParser:
         data['evt_vnd1'] = self.decode_uint32(registers[42:44])
         data['evt_vnd2'] = self.decode_uint32(registers[44:46])
         data['evt_vnd3'] = self.decode_uint32(registers[46:48])
-        data['evt_vnd4'] = self.decode_uint32(registers[48:50]) if len(registers) > 48 else 0
+        data['evt_vnd4'] = self.decode_uint32(registers[48:50]) if len(registers) >= 50 else 0
 
         return data
 

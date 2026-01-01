@@ -101,6 +101,8 @@ hooks:
     - "mkdir -p ${SERVICE_DATA}/data ${SERVICE_DATA}/logs"
   post_deploy:
     - "echo 'Fronius Inverters service deployed successfully'"
+    # Create InfluxDB bucket in stack influxdb container (if exists)
+    - "docker exec ${STACK}-influxdb influx bucket create -n '${FRONIUS_INV_INFLUXDB_BUCKET}' -o '${FRONIUS_INV_INFLUXDB_ORG}' 2>/dev/null && echo '✓ InfluxDB bucket ${FRONIUS_INV_INFLUXDB_BUCKET} created' || true"
     - "docker logs ${CONTAINER_NAME} --tail 5 2>/dev/null || true"
 
 compose: |
@@ -131,15 +133,16 @@ compose: |
       - INFLUXDB_ORG=${FRONIUS_INV_INFLUXDB_ORG}
       - INFLUXDB_BUCKET=${FRONIUS_INV_INFLUXDB_BUCKET}
       - LOG_LEVEL=${FRONIUS_INV_LOG_LEVEL}
+      - PING_CHECK_ENABLED=false
     volumes:
       - ${DOCKER_ROOT}/fronius-inverters/config:/app/config:ro
       - ${DOCKER_ROOT}/fronius-inverters/data:/app/data
       - ${DOCKER_ROOT}/fronius-inverters/logs:/app/logs
     healthcheck:
-      test: ["CMD", "pgrep", "-f", "fronius_modbus_mqtt.py"]
+      test: ["CMD", "python", "/app/healthcheck.py"]
       interval: 60s
       timeout: 10s
-      start_period: 30s
+      start_period: 60s
       retries: 3
     logging:
       driver: "json-file"

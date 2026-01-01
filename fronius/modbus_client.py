@@ -51,7 +51,10 @@ def ping_host(host: str, timeout: int = 2) -> bool:
             timeout=timeout + 1
         )
         return result.returncode == 0
-    except (subprocess.TimeoutExpired, Exception):
+    except subprocess.TimeoutExpired:
+        return False
+    except Exception as e:
+        logging.debug(f"Ping check failed for {host}: {e}")
         return False
 
 
@@ -149,11 +152,11 @@ class ModbusConnection:
                         slave=unit_id
                     )
 
-                    if not result.isError():
+                    if not result.isError() and result.registers:
                         self.successful_reads += 1
                         self.last_unit_id = unit_id
                         return result.registers
-                    else:
+                    elif result.isError():
                         if attempt < self.config.retry_attempts - 1:
                             time.sleep(self.config.retry_delay)
 
@@ -279,7 +282,7 @@ class DevicePoller(threading.Thread):
                 self.log.debug(f"Inverter {unit_id}: main register read failed, retry {attempt + 1}/{max_retries}")
                 time.sleep(0.5)
             else:
-                self.log.debug(f"Inverter {unit_id}: main register read failed after {max_retries} attempts")
+                self.log.warning(f"Inverter {unit_id}: main register read failed after {max_retries} attempts")
                 # Force reconnect on next read to clear any buffer issues
                 self.connection.connected = False
                 return False
@@ -349,6 +352,8 @@ class DevicePoller(threading.Thread):
                 if storage_data:
                     data['storage'] = storage_data
                     self.publish_callback(unit_id, 'storage', storage_data)
+            else:
+                self.log.debug(f"Inverter {unit_id}: storage read failed")
 
         # Publish to MQTT
         self.publish_callback(unit_id, 'inverter', data)
@@ -375,7 +380,7 @@ class DevicePoller(threading.Thread):
                     self.log.debug(f"Inverter {unit_id}: MPPT read failed, retry {attempt + 1}/{max_retries}")
                     time.sleep(1.0)  # Wait 1s before retry
                     continue
-                self.log.debug(f"Inverter {unit_id}: MPPT read failed after {max_retries} attempts")
+                self.log.warning(f"Inverter {unit_id}: MPPT read failed after {max_retries} attempts")
                 return None
 
             # Verify model header (offset 0-1)
@@ -489,7 +494,7 @@ class DevicePoller(threading.Thread):
                     self.log.debug(f"Inverter {unit_id}: Model 123 read failed, retry {attempt + 1}/{max_retries}")
                     time.sleep(1.0)  # Wait 1s before retry
                     continue
-                self.log.debug(f"Inverter {unit_id}: Model 123 read failed after {max_retries} attempts")
+                self.log.warning(f"Inverter {unit_id}: Model 123 read failed after {max_retries} attempts")
                 return None
 
             # Verify model ID
@@ -499,7 +504,7 @@ class DevicePoller(threading.Thread):
                     self.log.debug(f"Inverter {unit_id}: Model 123 mismatch (got {model_id}), retry {attempt + 1}/{max_retries}")
                     time.sleep(1.0)  # Wait 1s before retry
                     continue
-                self.log.debug(f"Inverter {unit_id}: Model 123 mismatch (got {model_id}) after {max_retries} attempts")
+                self.log.warning(f"Inverter {unit_id}: Model 123 mismatch (got {model_id}) after {max_retries} attempts")
                 return None
 
             # Success - break out of retry loop
@@ -600,7 +605,7 @@ class DevicePoller(threading.Thread):
                 self.log.debug(f"Meter {unit_id}: read failed, retry {attempt + 1}/{max_retries}")
                 time.sleep(0.5)
             else:
-                self.log.debug(f"Meter {unit_id}: read failed after {max_retries} attempts")
+                self.log.warning(f"Meter {unit_id}: read failed after {max_retries} attempts")
                 return False
 
         data = self.parser.parse_meter_measurements(regs)
@@ -732,10 +737,8 @@ class DevicePoller(threading.Thread):
                     else:
                         self._enter_sleep_mode(f"No data after {self._consecutive_failures} attempts")
 
-            # Sleep before next poll cycle
-            if self._in_sleep_mode:
-                # In sleep mode, use longer interval
-                time.sleep(self._get_poll_interval())
+            # Sleep before next poll cycle (always sleep, just different intervals)
+            time.sleep(self._get_poll_interval())
 
         self.connection.disconnect()
         self.log.info("DevicePoller: stopped")

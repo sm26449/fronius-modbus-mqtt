@@ -103,6 +103,8 @@ hooks:
     - "mkdir -p ${SERVICE_DATA}/data ${SERVICE_DATA}/logs"
   post_deploy:
     - "echo 'Fronius Modbus MQTT service deployed successfully'"
+    # Create InfluxDB bucket in stack influxdb container (if exists)
+    - "docker exec ${STACK}-influxdb influx bucket create -n '${FRONIUS_INFLUXDB_BUCKET}' -o '${FRONIUS_INFLUXDB_ORG}' 2>/dev/null && echo '✓ InfluxDB bucket ${FRONIUS_INFLUXDB_BUCKET} created' || true"
     - "docker logs ${CONTAINER_NAME} --tail 5 2>/dev/null || true"
 
 compose: |
@@ -133,6 +135,7 @@ compose: |
       - INFLUXDB_ORG=${FRONIUS_INFLUXDB_ORG}
       - INFLUXDB_BUCKET=${FRONIUS_INFLUXDB_BUCKET}
       - LOG_LEVEL=${FRONIUS_LOG_LEVEL}
+      - PING_CHECK_ENABLED=false
     volumes:
       - ${DOCKER_ROOT}/fronius-modbus-mqtt/config:/app/config:ro
       - ${DOCKER_ROOT}/fronius-modbus-mqtt/data:/app/data
