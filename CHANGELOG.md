@@ -5,6 +5,19 @@ All notable changes to Fronius Modbus MQTT will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.3] - 2026-01-04
+
+### Added
+- **InfluxDB Connection Retry Logic**
+  - Retry with exponential backoff at startup (10 attempts, 2s to 60s delay)
+  - Background reconnection thread if initial connection fails
+  - Automatic reconnection every 30 seconds until successful
+  - Graceful thread cleanup on shutdown
+
+### Fixed
+- InfluxDB connection failures on container restart no longer require manual restart
+- Service continues to publish to MQTT while attempting InfluxDB reconnection
+
 ## [1.2.2] - 2025-01-01
 
 ### Fixed

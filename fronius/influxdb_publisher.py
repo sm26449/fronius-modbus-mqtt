@@ -7,6 +7,13 @@ from typing import Dict, Any, Optional
 from .config import InfluxDBConfig
 from .logging_setup import get_logger
 
+# Retry configuration
+RETRY_MAX_ATTEMPTS = 10
+RETRY_INITIAL_DELAY = 2  # seconds
+RETRY_MAX_DELAY = 60  # seconds
+RETRY_BACKOFF_FACTOR = 2
+RECONNECT_CHECK_INTERVAL = 30  # seconds
+
 
 class InfluxDBPublisher:
     """
@@ -42,8 +49,15 @@ class InfluxDBPublisher:
         self.writes_total = 0
         self.writes_failed = 0
 
+        # Reconnection thread control
+        self._stop_reconnect = threading.Event()
+        self._reconnect_thread = None
+
         if config.enabled:
-            self._setup_client()
+            self._setup_client_with_retry()
+            # Start background reconnection thread if not connected
+            if not self.connected:
+                self._start_reconnect_thread()
 
     def _setup_client(self):
         """Setup InfluxDB client"""
@@ -79,8 +93,59 @@ class InfluxDBPublisher:
             )
             self.config.enabled = False
         except Exception as e:
-            self.log.error(f"InfluxDB connection error: {e}")
+            self.log.warning(f"InfluxDB health check failed: {e}")
             self.connected = False
+
+    def _setup_client_with_retry(self):
+        """Setup InfluxDB client with retry logic"""
+        delay = RETRY_INITIAL_DELAY
+
+        for attempt in range(1, RETRY_MAX_ATTEMPTS + 1):
+            self._setup_client()
+
+            if self.connected:
+                return  # Successfully connected
+
+            if attempt < RETRY_MAX_ATTEMPTS:
+                self.log.info(
+                    f"InfluxDB connection attempt {attempt}/{RETRY_MAX_ATTEMPTS} failed, "
+                    f"retrying in {delay}s..."
+                )
+                time.sleep(delay)
+                delay = min(delay * RETRY_BACKOFF_FACTOR, RETRY_MAX_DELAY)
+
+        self.log.warning(
+            f"InfluxDB: all {RETRY_MAX_ATTEMPTS} connection attempts failed. "
+            "Will continue trying in background."
+        )
+
+    def _start_reconnect_thread(self):
+        """Start background thread for reconnection attempts"""
+        if self._reconnect_thread is not None and self._reconnect_thread.is_alive():
+            return  # Thread already running
+
+        self._stop_reconnect.clear()
+        self._reconnect_thread = threading.Thread(
+            target=self._reconnect_loop,
+            name="InfluxDB-Reconnect",
+            daemon=True
+        )
+        self._reconnect_thread.start()
+        self.log.info("InfluxDB reconnection thread started")
+
+    def _reconnect_loop(self):
+        """Background loop that attempts to reconnect to InfluxDB"""
+        while not self._stop_reconnect.is_set():
+            if not self.connected:
+                self.log.debug("Attempting InfluxDB reconnection...")
+                self._setup_client()
+
+                if self.connected:
+                    self.log.info("InfluxDB reconnected successfully")
+                    break
+
+            # Wait before next attempt
+            self._stop_reconnect.wait(RECONNECT_CHECK_INTERVAL)
 
     def is_enabled(self) -> bool:
         """Check if InfluxDB publishing is enabled and connected"""
@@ -273,6 +338,11 @@ class InfluxDBPublisher:
 
     def close(self):
         """Close InfluxDB connection"""
+        # Stop reconnection thread
+        self._stop_reconnect.set()
+        if self._reconnect_thread is not None and self._reconnect_thread.is_alive():
+            self._reconnect_thread.join(timeout=2)
+
         if self.write_api:
             try:
                 self.write_api.close()
