@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [1.2.3] - 2026-01-04
 
 ### Added
+- **Modbus Connection Retry Logic**
+  - Retry with exponential backoff at startup (10 attempts, 2s to 60s delay)
+  - Prevents container exit when Fronius DataManager is temporarily unavailable
+
 - **InfluxDB Connection Retry Logic**
   - Retry with exponential backoff at startup (10 attempts, 2s to 60s delay)
   - Background reconnection thread if initial connection fails
@@ -22,6 +26,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Graceful thread cleanup on shutdown
 
 ### Fixed
+- Modbus connection failures on container restart no longer cause immediate exit
 - InfluxDB connection failures on container restart no longer require manual restart
 - MQTT connection failures on container restart no longer require manual restart
 - Services continue operating while attempting reconnection to unavailable backends

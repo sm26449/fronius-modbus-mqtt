@@ -121,7 +121,7 @@ class FroniusModbusMQTT:
             # InfluxDB storage support can be added later if needed
 
     def _init_modbus(self) -> bool:
-        """Initialize Modbus client and connect"""
+        """Initialize Modbus client and connect with retry logic"""
         self.modbus_client = FroniusModbusClient(
             self.config.modbus,
             self.config.devices,
@@ -129,11 +129,26 @@ class FroniusModbusMQTT:
             publish_callback=self._publish_data
         )
 
-        if not self.modbus_client.connect():
-            self.log.error("Failed to connect to Modbus server")
-            return False
+        # Retry configuration
+        max_attempts = 10
+        initial_delay = 2
+        max_delay = 60
+        delay = initial_delay
 
-        return True
+        for attempt in range(1, max_attempts + 1):
+            if self.modbus_client.connect():
+                return True
+
+            if attempt < max_attempts:
+                self.log.warning(
+                    f"Modbus connection attempt {attempt}/{max_attempts} failed, "
+                    f"retrying in {delay}s..."
+                )
+                time.sleep(delay)
+                delay = min(delay * 2, max_delay)
+
+        self.log.error(f"Failed to connect to Modbus server after {max_attempts} attempts")
+        return False
 
     def _init_mqtt(self) -> bool:
         """Initialize MQTT publisher"""
