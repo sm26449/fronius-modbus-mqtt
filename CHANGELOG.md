@@ -13,10 +13,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Background reconnection thread if initial connection fails
   - Automatic reconnection every 30 seconds until successful
   - Graceful thread cleanup on shutdown
+  - Write error detection triggers automatic reconnection
+
+- **MQTT Connection Retry Logic**
+  - Retry with exponential backoff at startup (10 attempts, 2s to 60s delay)
+  - Background reconnection thread if initial connection fails
+  - Automatic reconnection every 30 seconds until successful
+  - Graceful thread cleanup on shutdown
 
 ### Fixed
 - InfluxDB connection failures on container restart no longer require manual restart
-- Service continues to publish to MQTT while attempting InfluxDB reconnection
+- MQTT connection failures on container restart no longer require manual restart
+- Services continue operating while attempting reconnection to unavailable backends
+- InfluxDB write errors now trigger automatic reconnection when connection is lost
 
 ## [1.2.2] - 2025-01-01
 

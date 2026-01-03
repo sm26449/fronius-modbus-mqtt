@@ -147,6 +147,34 @@ class InfluxDBPublisher:
             # Wait before next attempt
             self._stop_reconnect.wait(RECONNECT_CHECK_INTERVAL)
 
+    def _handle_write_error(self, error: Exception):
+        """
+        Handle write errors and trigger reconnection if needed.
+
+        Args:
+            error: The exception that occurred during write
+        """
+        # Check if this is a connection-related error
+        error_str = str(error).lower()
+        connection_errors = [
+            'connection refused',
+            'connection reset',
+            'connection closed',
+            'no route to host',
+            'network is unreachable',
+            'timeout',
+            'timed out',
+            'broken pipe',
+            'connection aborted',
+        ]
+
+        is_connection_error = any(err in error_str for err in connection_errors)
+
+        if is_connection_error and self.connected:
+            self.log.warning("InfluxDB connection lost, starting reconnection...")
+            self.connected = False
+            self._start_reconnect_thread()
+
     def is_enabled(self) -> bool:
         """Check if InfluxDB publishing is enabled and connected"""
         return self.config.enabled and self.connected
@@ -274,6 +302,7 @@ class InfluxDBPublisher:
         except Exception as e:
             self.writes_failed += 1
             self.log.error(f"InfluxDB write error for inverter {device_id}: {e}")
+            self._handle_write_error(e)
 
     def write_meter_data(self, device_id: str, data: Dict):
         """
@@ -327,6 +356,7 @@ class InfluxDBPublisher:
         except Exception as e:
             self.writes_failed += 1
             self.log.error(f"InfluxDB write error for meter {device_id}: {e}")
+            self._handle_write_error(e)
 
     def flush(self):
         """Flush pending writes"""
