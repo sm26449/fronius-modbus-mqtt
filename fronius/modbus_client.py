@@ -536,6 +536,9 @@ class DevicePoller(threading.Thread):
         wmax_ena = regs[9]
 
         # Power factor
+        # Note: Fronius reports PF as percentage but SF may be 0 instead of -2
+        if sf_pf == 0:
+            sf_pf = -2  # Force correct scale for percentage format
         pf_raw = regs[10] if regs[10] < 32768 else regs[10] - 65536
         pf = pf_raw * (10 ** sf_pf) if regs[10] != 0xFFFF else None
         pf_win_tms = regs[11]

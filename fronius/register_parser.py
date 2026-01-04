@@ -233,6 +233,9 @@ class RegisterParser:
         # Apparent/Reactive Power
         data['apparent_power'] = self.apply_scale_factor(self.decode_int16(registers[16]), sf_va)
         data['reactive_power'] = self.apply_scale_factor(self.decode_int16(registers[18]), sf_var)
+        # Note: Fronius reports PF as percentage (0-100) but SF may be 0 instead of -2
+        if sf_pf == 0:
+            sf_pf = -2  # Force correct scale for percentage format
         data['power_factor'] = self.apply_scale_factor(self.decode_int16(registers[20]), sf_pf)
 
         # Lifetime Energy
@@ -441,6 +444,10 @@ class RegisterParser:
         data['var_c'] = self.apply_scale_factor(self.decode_int16(registers[29]), sf_var)
 
         # Power Factor
+        # Note: Fronius meters report PF as percentage (0-100) but SF may be 0 instead of -2
+        # If SF=0, assume PF is in percentage format and use -2 to convert to -1.0 to 1.0 range
+        if sf_pf == 0:
+            sf_pf = -2  # Force correct scale for percentage format
         data['pf_avg'] = self.apply_scale_factor(self.decode_int16(registers[31]), sf_pf)
         data['pf_a'] = self.apply_scale_factor(self.decode_int16(registers[32]), sf_pf)
         data['pf_b'] = self.apply_scale_factor(self.decode_int16(registers[33]), sf_pf)
