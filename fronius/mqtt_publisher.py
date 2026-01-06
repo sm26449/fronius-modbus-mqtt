@@ -3,11 +3,12 @@
 import time
 import json
 import threading
-from typing import Dict, Any, Optional, Set
+from typing import Dict, Any, Optional, Set, List
 import paho.mqtt.client as mqtt
 
 from .config import MQTTConfig
 from .logging_setup import get_logger
+from . import __version__
 
 # Retry configuration
 RETRY_MAX_ATTEMPTS = 10
@@ -15,6 +16,126 @@ RETRY_INITIAL_DELAY = 2  # seconds
 RETRY_MAX_DELAY = 60  # seconds
 RETRY_BACKOFF_FACTOR = 2
 RECONNECT_CHECK_INTERVAL = 30  # seconds
+
+# Home Assistant Discovery
+HA_DISCOVERY_PREFIX = "homeassistant"
+
+# Inverter sensor definitions for HA discovery
+# Format: (sunspec_name, ha_name, unit, device_class, state_class, icon)
+HA_INVERTER_SENSORS = [
+    # AC Power
+    ("W", "AC Power", "W", "power", "measurement", None),
+    ("VA", "Apparent Power", "VA", "apparent_power", "measurement", None),
+    ("VAr", "Reactive Power", "var", "reactive_power", "measurement", None),
+    ("PF", "Power Factor", None, "power_factor", "measurement", None),
+    ("Hz", "Frequency", "Hz", "frequency", "measurement", None),
+    ("WH", "Lifetime Energy", "Wh", "energy", "total_increasing", None),
+    # AC Current
+    ("A", "AC Current", "A", "current", "measurement", None),
+    ("AphA", "AC Current Phase A", "A", "current", "measurement", None),
+    ("AphB", "AC Current Phase B", "A", "current", "measurement", None),
+    ("AphC", "AC Current Phase C", "A", "current", "measurement", None),
+    # AC Voltage
+    ("PhVphA", "Voltage Phase A", "V", "voltage", "measurement", None),
+    ("PhVphB", "Voltage Phase B", "V", "voltage", "measurement", None),
+    ("PhVphC", "Voltage Phase C", "V", "voltage", "measurement", None),
+    ("PPVphAB", "Voltage AB", "V", "voltage", "measurement", None),
+    ("PPVphBC", "Voltage BC", "V", "voltage", "measurement", None),
+    ("PPVphCA", "Voltage CA", "V", "voltage", "measurement", None),
+    # DC
+    ("DCA", "DC Current", "A", "current", "measurement", None),
+    ("DCV", "DC Voltage", "V", "voltage", "measurement", None),
+    ("DCW", "DC Power", "W", "power", "measurement", None),
+    # Temperatures
+    ("TmpCab", "Cabinet Temperature", "°C", "temperature", "measurement", None),
+    ("TmpSnk", "Heatsink Temperature", "°C", "temperature", "measurement", None),
+    ("TmpTrns", "Transformer Temperature", "°C", "temperature", "measurement", None),
+    ("TmpOt", "Other Temperature", "°C", "temperature", "measurement", None),
+    # Status
+    ("St", "Status Code", None, None, None, "mdi:information-outline"),
+    ("status", "Status", None, None, None, "mdi:solar-power"),
+    ("active", "Active", None, None, None, "mdi:power"),
+]
+
+# Meter sensor definitions for HA discovery
+HA_METER_SENSORS = [
+    # Power
+    ("W", "Power", "W", "power", "measurement", None),
+    ("WphA", "Power Phase A", "W", "power", "measurement", None),
+    ("WphB", "Power Phase B", "W", "power", "measurement", None),
+    ("WphC", "Power Phase C", "W", "power", "measurement", None),
+    # Apparent Power
+    ("VA", "Apparent Power", "VA", "apparent_power", "measurement", None),
+    ("VAphA", "Apparent Power Phase A", "VA", "apparent_power", "measurement", None),
+    ("VAphB", "Apparent Power Phase B", "VA", "apparent_power", "measurement", None),
+    ("VAphC", "Apparent Power Phase C", "VA", "apparent_power", "measurement", None),
+    # Reactive Power
+    ("VAR", "Reactive Power", "var", "reactive_power", "measurement", None),
+    ("VARphA", "Reactive Power Phase A", "var", "reactive_power", "measurement", None),
+    ("VARphB", "Reactive Power Phase B", "var", "reactive_power", "measurement", None),
+    ("VARphC", "Reactive Power Phase C", "var", "reactive_power", "measurement", None),
+    # Power Factor
+    ("PF", "Power Factor", None, "power_factor", "measurement", None),
+    ("PFphA", "Power Factor Phase A", None, "power_factor", "measurement", None),
+    ("PFphB", "Power Factor Phase B", None, "power_factor", "measurement", None),
+    ("PFphC", "Power Factor Phase C", None, "power_factor", "measurement", None),
+    # Current
+    ("A", "Current", "A", "current", "measurement", None),
+    ("AphA", "Current Phase A", "A", "current", "measurement", None),
+    ("AphB", "Current Phase B", "A", "current", "measurement", None),
+    ("AphC", "Current Phase C", "A", "current", "measurement", None),
+    # Voltage LN
+    ("PhV", "Voltage LN Average", "V", "voltage", "measurement", None),
+    ("PhVphA", "Voltage AN", "V", "voltage", "measurement", None),
+    ("PhVphB", "Voltage BN", "V", "voltage", "measurement", None),
+    ("PhVphC", "Voltage CN", "V", "voltage", "measurement", None),
+    # Voltage LL
+    ("PPV", "Voltage LL Average", "V", "voltage", "measurement", None),
+    ("PPVphAB", "Voltage AB", "V", "voltage", "measurement", None),
+    ("PPVphBC", "Voltage BC", "V", "voltage", "measurement", None),
+    ("PPVphCA", "Voltage CA", "V", "voltage", "measurement", None),
+    # Frequency
+    ("Hz", "Frequency", "Hz", "frequency", "measurement", None),
+    # Energy
+    ("TotWhExp", "Energy Exported", "Wh", "energy", "total_increasing", None),
+    ("TotWhExpPhA", "Energy Exported Phase A", "Wh", "energy", "total_increasing", None),
+    ("TotWhExpPhB", "Energy Exported Phase B", "Wh", "energy", "total_increasing", None),
+    ("TotWhExpPhC", "Energy Exported Phase C", "Wh", "energy", "total_increasing", None),
+    ("TotWhImp", "Energy Imported", "Wh", "energy", "total_increasing", None),
+    ("TotWhImpPhA", "Energy Imported Phase A", "Wh", "energy", "total_increasing", None),
+    ("TotWhImpPhB", "Energy Imported Phase B", "Wh", "energy", "total_increasing", None),
+    ("TotWhImpPhC", "Energy Imported Phase C", "Wh", "energy", "total_increasing", None),
+]
+
+# Storage sensor definitions for HA discovery
+HA_STORAGE_SENSORS = [
+    ("ChaState", "State of Charge", "%", "battery", "measurement", None),
+    ("InBatV", "Battery Voltage", "V", "voltage", "measurement", None),
+    ("WChaMax", "Max Charge Power", "W", "power", "measurement", None),
+    ("status", "Charge Status", None, None, None, "mdi:battery-charging"),
+]
+
+# Inverter controls sensor definitions for HA discovery
+HA_INVERTER_CONTROLS_SENSORS = [
+    ("controls/connected", "Connected", None, None, None, "mdi:connection"),
+    ("controls/power_limit_pct", "Power Limit", "%", None, "measurement", "mdi:speedometer"),
+    ("controls/power_limit_enabled", "Power Limit Enabled", None, None, None, "mdi:toggle-switch"),
+    ("controls/power_factor", "Power Factor Setpoint", None, "power_factor", "measurement", None),
+    ("controls/power_factor_enabled", "PF Control Enabled", None, None, None, "mdi:toggle-switch"),
+    ("controls/var_enabled", "VAR Control Enabled", None, None, None, "mdi:toggle-switch"),
+]
+
+# MPPT string sensor definitions (per string)
+HA_MPPT_STRING_SENSORS = [
+    ("DCA", "Current", "A", "current", "measurement"),
+    ("DCV", "Voltage", "V", "voltage", "measurement"),
+    ("DCW", "Power", "W", "power", "measurement"),
+    ("DCWH", "Energy", "Wh", "energy", "total_increasing"),
+    ("Tmp", "Temperature", "°C", "temperature", "measurement"),
+]
+
+# Default number of MPPT strings for Fronius inverters
+DEFAULT_MPPT_STRINGS = 2
 
 
 class MQTTPublisher:
@@ -604,6 +725,259 @@ class MQTTPublisher:
         """
         topic = f"{self.config.topic_prefix}/status"
         self.publish(topic, status)
+
+    def _build_ha_device_info(self, device_type: str, device_id: str,
+                              model: str = None, manufacturer: str = "Fronius",
+                              serial_number: str = None) -> Dict:
+        """
+        Build Home Assistant device info block.
+
+        Args:
+            device_type: 'inverter', 'meter', or 'storage'
+            device_id: Device identifier (Modbus unit ID, used in topics)
+            model: Device model name
+            manufacturer: Manufacturer name
+            serial_number: Device serial number (for display in device name)
+
+        Returns:
+            Device info dictionary for HA discovery
+        """
+        device_name_map = {
+            'inverter': 'Inverter',
+            'meter': 'Smart Meter',
+            'storage': 'Storage'
+        }
+
+        # Use device_id (unit_id) for identifier - consistent with MQTT topics
+        device_name = f"Fronius {device_name_map.get(device_type, device_type.title())} {device_id}"
+        if serial_number:
+            device_name = f"Fronius {device_name_map.get(device_type, device_type.title())} {device_id} ({serial_number})"
+
+        device_info = {
+            "identifiers": [f"fronius_{device_type}_{device_id}"],
+            "name": device_name,
+            "manufacturer": manufacturer,
+            "sw": f"fronius-modbus-mqtt {__version__}",
+        }
+
+        if model:
+            device_info["model"] = model
+
+        return device_info
+
+    def _build_ha_origin(self) -> Dict:
+        """Build Home Assistant origin block."""
+        return {
+            "name": "fronius-modbus-mqtt",
+            "sw": __version__,
+            "url": "https://github.com/sm2669/fronius-modbus-mqtt"
+        }
+
+    def _build_ha_sensor_config(self, device_type: str, device_id: str,
+                                 sunspec_name: str, ha_name: str,
+                                 unit: str = None, device_class: str = None,
+                                 state_class: str = None, icon: str = None,
+                                 device_info: Dict = None) -> Dict:
+        """
+        Build Home Assistant sensor discovery config.
+
+        Args:
+            device_type: 'inverter', 'meter', or 'storage'
+            device_id: Device identifier
+            sunspec_name: SunSpec register name (used in state topic)
+            ha_name: Human-readable name for HA
+            unit: Unit of measurement
+            device_class: HA device class
+            state_class: HA state class
+            icon: MDI icon
+            device_info: Pre-built device info dict
+
+        Returns:
+            HA discovery config dictionary
+        """
+        # Build unique ID
+        safe_name = sunspec_name.lower().replace("/", "_")
+        unique_id = f"fronius_{device_type}_{device_id}_{safe_name}"
+
+        # Build state topic
+        state_topic = self._build_topic(device_type, device_id, sunspec_name)
+
+        # Build availability topic
+        availability_topic = f"{self.config.topic_prefix}/status"
+
+        config = {
+            "name": ha_name,
+            "state_topic": state_topic,
+            "availability_topic": availability_topic,
+            "unique_id": unique_id,
+            "origin": self._build_ha_origin(),
+        }
+
+        if unit:
+            config["unit_of_measurement"] = unit
+        if device_class:
+            config["device_class"] = device_class
+        if state_class:
+            config["state_class"] = state_class
+        if icon:
+            config["icon"] = icon
+        if device_info:
+            config["device"] = device_info
+
+        return config
+
+    def publish_ha_discovery_inverter(self, device_id: str, model: str = None,
+                                       manufacturer: str = "Fronius",
+                                       num_mppt_strings: int = 0,
+                                       serial_number: str = None) -> int:
+        """
+        Publish Home Assistant discovery configs for an inverter.
+
+        Args:
+            device_id: Device identifier (Modbus unit ID, used in MQTT topics)
+            model: Device model name
+            manufacturer: Manufacturer name
+            num_mppt_strings: Number of MPPT strings to publish (0 = use default)
+            serial_number: Device serial number (for unique identifier)
+
+        Returns:
+            Number of discovery configs published
+        """
+        if not self.connected:
+            return 0
+
+        device_info = self._build_ha_device_info('inverter', device_id, model, manufacturer, serial_number)
+        count = 0
+
+        # Publish main inverter sensors
+        for sensor in HA_INVERTER_SENSORS:
+            sunspec_name, ha_name, unit, device_class, state_class, icon = sensor
+
+            config = self._build_ha_sensor_config(
+                'inverter', device_id, sunspec_name, ha_name,
+                unit, device_class, state_class, icon, device_info
+            )
+
+            # Build hierarchical discovery topic: homeassistant/sensor/fronius/inverter_1/w/config
+            safe_name = sunspec_name.lower().replace("/", "_")
+            discovery_topic = f"{HA_DISCOVERY_PREFIX}/sensor/fronius/inverter_{device_id}/{safe_name}/config"
+
+            if self._publish(discovery_topic, json.dumps(config), retain=True):
+                count += 1
+
+        # Publish controls sensors
+        for sensor in HA_INVERTER_CONTROLS_SENSORS:
+            sunspec_name, ha_name, unit, device_class, state_class, icon = sensor
+
+            config = self._build_ha_sensor_config(
+                'inverter', device_id, sunspec_name, ha_name,
+                unit, device_class, state_class, icon, device_info
+            )
+
+            safe_name = sunspec_name.lower().replace("/", "_")
+            discovery_topic = f"{HA_DISCOVERY_PREFIX}/sensor/fronius/inverter_{device_id}/{safe_name}/config"
+
+            if self._publish(discovery_topic, json.dumps(config), retain=True):
+                count += 1
+
+        # Publish MPPT string sensors (use default if not specified)
+        mppt_count = num_mppt_strings if num_mppt_strings > 0 else DEFAULT_MPPT_STRINGS
+        for string_num in range(1, mppt_count + 1):
+            for sensor_suffix, ha_name_suffix, unit, device_class, state_class in HA_MPPT_STRING_SENSORS:
+                sunspec_name = f"mppt/string{string_num}/{sensor_suffix}"
+                ha_name = f"String {string_num} {ha_name_suffix}"
+
+                config = self._build_ha_sensor_config(
+                    'inverter', device_id, sunspec_name, ha_name,
+                    unit, device_class, state_class, None, device_info
+                )
+
+                safe_name = sunspec_name.lower().replace("/", "_")
+                discovery_topic = f"{HA_DISCOVERY_PREFIX}/sensor/fronius/inverter_{device_id}/{safe_name}/config"
+
+                if self._publish(discovery_topic, json.dumps(config), retain=True):
+                    count += 1
+
+        self.log.info(f"Published {count} HA discovery configs for inverter {device_id}")
+        return count
+
+    def publish_ha_discovery_meter(self, device_id: str, model: str = None,
+                                    manufacturer: str = "Fronius",
+                                    serial_number: str = None) -> int:
+        """
+        Publish Home Assistant discovery configs for a meter.
+
+        Args:
+            device_id: Device identifier (Modbus unit ID, used in MQTT topics)
+            model: Device model name
+            manufacturer: Manufacturer name
+            serial_number: Device serial number (for unique identifier)
+
+        Returns:
+            Number of discovery configs published
+        """
+        if not self.connected:
+            return 0
+
+        device_info = self._build_ha_device_info('meter', device_id, model, manufacturer, serial_number)
+        count = 0
+
+        for sensor in HA_METER_SENSORS:
+            sunspec_name, ha_name, unit, device_class, state_class, icon = sensor
+
+            config = self._build_ha_sensor_config(
+                'meter', device_id, sunspec_name, ha_name,
+                unit, device_class, state_class, icon, device_info
+            )
+
+            # Build hierarchical discovery topic: homeassistant/sensor/fronius/meter_240/w/config
+            safe_name = sunspec_name.lower().replace("/", "_")
+            discovery_topic = f"{HA_DISCOVERY_PREFIX}/sensor/fronius/meter_{device_id}/{safe_name}/config"
+
+            if self._publish(discovery_topic, json.dumps(config), retain=True):
+                count += 1
+
+        self.log.info(f"Published {count} HA discovery configs for meter {device_id}")
+        return count
+
+    def publish_ha_discovery_storage(self, device_id: str, model: str = None,
+                                      manufacturer: str = "Fronius",
+                                      serial_number: str = None) -> int:
+        """
+        Publish Home Assistant discovery configs for storage.
+
+        Args:
+            device_id: Device identifier (Modbus unit ID, used in MQTT topics)
+            model: Device model name
+            manufacturer: Manufacturer name
+            serial_number: Device serial number (for unique identifier)
+
+        Returns:
+            Number of discovery configs published
+        """
+        if not self.connected:
+            return 0
+
+        device_info = self._build_ha_device_info('storage', device_id, model, manufacturer, serial_number)
+        count = 0
+
+        for sensor in HA_STORAGE_SENSORS:
+            sunspec_name, ha_name, unit, device_class, state_class, icon = sensor
+
+            config = self._build_ha_sensor_config(
+                'storage', device_id, sunspec_name, ha_name,
+                unit, device_class, state_class, icon, device_info
+            )
+
+            # Build hierarchical discovery topic: homeassistant/sensor/fronius/storage_1/chastate/config
+            safe_name = sunspec_name.lower().replace("/", "_")
+            discovery_topic = f"{HA_DISCOVERY_PREFIX}/sensor/fronius/storage_{device_id}/{safe_name}/config"
+
+            if self._publish(discovery_topic, json.dumps(config), retain=True):
+                count += 1
+
+        self.log.info(f"Published {count} HA discovery configs for storage {device_id}")
+        return count
 
     def get_stats(self) -> Dict:
         """Return publisher statistics"""

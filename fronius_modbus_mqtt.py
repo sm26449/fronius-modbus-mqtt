@@ -194,6 +194,55 @@ class FroniusModbusMQTT:
         if not inverters and not meters:
             self.log.warning("No devices found!")
 
+        # Publish Home Assistant discovery configs if enabled
+        if self.config.mqtt.ha_discovery_enabled and self.mqtt_publisher:
+            self._publish_ha_discovery(inverters, meters)
+
+    def _publish_ha_discovery(self, inverters: list, meters: list):
+        """Publish Home Assistant MQTT discovery configs for all discovered devices"""
+        self.log.info("Publishing Home Assistant discovery configs...")
+        total_configs = 0
+
+        # Publish inverter discovery configs
+        for inverter in inverters:
+            # device_id must match what's used in MQTT topics (unit_id from Modbus)
+            device_id = str(inverter.get('device_id', 'unknown'))
+            serial_number = inverter.get('serial_number', '')
+            model = inverter.get('model', '')
+            manufacturer = inverter.get('manufacturer', 'Fronius')
+
+            # Count MPPT strings if available
+            num_mppt = 0
+            if 'mppt' in inverter and 'num_modules' in inverter['mppt']:
+                num_mppt = inverter['mppt']['num_modules']
+
+            count = self.mqtt_publisher.publish_ha_discovery_inverter(
+                device_id, model, manufacturer, num_mppt, serial_number
+            )
+            total_configs += count
+
+            # Publish storage discovery if inverter has storage
+            if inverter.get('has_storage'):
+                count = self.mqtt_publisher.publish_ha_discovery_storage(
+                    device_id, model, manufacturer, serial_number
+                )
+                total_configs += count
+
+        # Publish meter discovery configs
+        for meter in meters:
+            # device_id must match what's used in MQTT topics (unit_id from Modbus)
+            device_id = str(meter.get('device_id', 'unknown'))
+            serial_number = meter.get('serial_number', '')
+            model = meter.get('model', '')
+            manufacturer = meter.get('manufacturer', 'Fronius')
+
+            count = self.mqtt_publisher.publish_ha_discovery_meter(
+                device_id, model, manufacturer, serial_number
+            )
+            total_configs += count
+
+        self.log.info(f"Published {total_configs} HA discovery configs")
+
     def start(self):
         """Start the application"""
         self.log.info("=" * 60)

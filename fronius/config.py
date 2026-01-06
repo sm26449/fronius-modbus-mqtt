@@ -8,7 +8,7 @@ Environment variable mapping:
   MODBUS_HOST, MODBUS_PORT, MODBUS_TIMEOUT
   INVERTER_IDS (comma-separated), METER_IDS (comma-separated)
   MQTT_ENABLED, MQTT_BROKER, MQTT_PORT, MQTT_USERNAME, MQTT_PASSWORD
-  MQTT_PREFIX, MQTT_RETAIN, MQTT_QOS
+  MQTT_PREFIX, MQTT_RETAIN, MQTT_QOS, HA_DISCOVERY_ENABLED
   INFLUXDB_ENABLED, INFLUXDB_URL, INFLUXDB_TOKEN, INFLUXDB_ORG
   INFLUXDB_BUCKET, INFLUXDB_WRITE_INTERVAL, INFLUXDB_PUBLISH_MODE
   POLL_INTERVAL, PUBLISH_MODE, LOG_LEVEL
@@ -94,6 +94,7 @@ class MQTTConfig:
     topic_prefix: str = "fronius"
     retain: bool = True
     qos: int = 0
+    ha_discovery_enabled: bool = False  # Home Assistant MQTT autodiscovery
 
 
 @dataclass
@@ -244,7 +245,8 @@ class ConfigLoader:
             password=_env_get('MQTT_PASSWORD', mq.get('password', '')),
             topic_prefix=_env_get('MQTT_PREFIX', mq.get('topic_prefix', 'fronius')),
             retain=_env_get('MQTT_RETAIN', mq.get('retain', True), bool),
-            qos=_env_get('MQTT_QOS', mq.get('qos', 0), int)
+            qos=_env_get('MQTT_QOS', mq.get('qos', 0), int),
+            ha_discovery_enabled=_env_get('HA_DISCOVERY_ENABLED', mq.get('ha_discovery_enabled', False), bool)
         )
 
         # Parse InfluxDB settings

@@ -5,6 +5,22 @@ All notable changes to Fronius Modbus MQTT will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.5] - 2026-01-07
+
+### Added
+- **Home Assistant MQTT Autodiscovery**
+  - Automatic registration of Fronius devices in Home Assistant
+  - Hierarchical topic structure: `homeassistant/sensor/fronius/inverter_1/w/config`
+  - Supports inverters, meters, and storage devices
+  - Includes proper device_class, state_class, and unit_of_measurement
+  - MPPT string sensors included when available
+  - Availability topic support (`fronius/status`) - devices go offline when container stops
+  - Origin metadata (software name, version, GitHub URL)
+  - Software version in device info
+  - Enable with `HA_DISCOVERY_ENABLED=true` environment variable
+  - Or `mqtt.ha_discovery_enabled: true` in YAML config
+  - Discovery configs are retained and published once at startup
+
 ## [1.2.4] - 2026-01-04
 
 ### Fixed
@@ -200,6 +216,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 | Version | Date | Highlights |
 |---------|------|------------|
+| 1.2.5 | 2026-01-07 | Home Assistant MQTT autodiscovery with hierarchical topics |
 | 1.2.4 | 2026-01-04 | Power Factor scale correction (was 100x too high) |
 | 1.2.3 | 2026-01-04 | Connection retry logic for Modbus, MQTT, InfluxDB |
 | 1.2.2 | 2025-01-01 | Modbus register validation, cross-platform ping fix |
