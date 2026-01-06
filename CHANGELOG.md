@@ -5,6 +5,16 @@ All notable changes to Fronius Modbus MQTT will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.4] - 2026-01-04
+
+### Fixed
+- **Power Factor Scale Correction**
+  - Fronius devices report PF as percentage (0-100) but SunSpec scale factor (PF_SF) returns 0 instead of -2
+  - This caused PF values to be 100x too high (e.g., 7-14 instead of 0.07-0.14)
+  - Fixed in `register_parser.py`: `parse_inverter_measurements()` and `parse_meter_measurements()`
+  - Fixed in `modbus_client.py`: `_read_immediate_controls()` (Model 123)
+  - PF values now correctly in -1.0 to 1.0 range
+
 ## [1.2.3] - 2026-01-04
 
 ### Added
@@ -190,6 +200,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 | Version | Date | Highlights |
 |---------|------|------------|
+| 1.2.4 | 2026-01-04 | Power Factor scale correction (was 100x too high) |
+| 1.2.3 | 2026-01-04 | Connection retry logic for Modbus, MQTT, InfluxDB |
+| 1.2.2 | 2025-01-01 | Modbus register validation, cross-platform ping fix |
 | 1.2.1 | 2024-12-04 | Docker ping fix, InfluxDB bucket auto-creation |
 | 1.2.0 | 2024-12-03 | Night/sleep mode detection, ping check, improved healthcheck |
 | 1.1.0 | 2024-12-03 | MPPT string data, Model 123 controls, single poller thread |
