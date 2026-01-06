@@ -54,7 +54,12 @@ HA_INVERTER_SENSORS = [
     # Status
     ("St", "Status Code", None, None, None, "mdi:information-outline"),
     ("status", "Status", None, None, None, "mdi:solar-power"),
-    ("active", "Active", None, None, None, "mdi:power"),
+]
+
+# Inverter binary sensor definitions for HA discovery
+# Format: (sunspec_name, ha_name, device_class, icon)
+HA_INVERTER_BINARY_SENSORS = [
+    ("active", "Active", "running", "mdi:power"),
 ]
 
 # Meter sensor definitions for HA discovery
@@ -117,12 +122,17 @@ HA_STORAGE_SENSORS = [
 
 # Inverter controls sensor definitions for HA discovery
 HA_INVERTER_CONTROLS_SENSORS = [
-    ("controls/connected", "Connected", None, None, None, "mdi:connection"),
     ("controls/power_limit_pct", "Power Limit", "%", None, "measurement", "mdi:speedometer"),
-    ("controls/power_limit_enabled", "Power Limit Enabled", None, None, None, "mdi:toggle-switch"),
     ("controls/power_factor", "Power Factor Setpoint", None, "power_factor", "measurement", None),
-    ("controls/power_factor_enabled", "PF Control Enabled", None, None, None, "mdi:toggle-switch"),
-    ("controls/var_enabled", "VAR Control Enabled", None, None, None, "mdi:toggle-switch"),
+]
+
+# Inverter controls binary sensor definitions for HA discovery
+# Format: (sunspec_name, ha_name, device_class, icon)
+HA_INVERTER_CONTROLS_BINARY_SENSORS = [
+    ("controls/connected", "Connected", "connectivity", "mdi:connection"),
+    ("controls/power_limit_enabled", "Power Limit Enabled", None, "mdi:toggle-switch"),
+    ("controls/power_factor_enabled", "PF Control Enabled", None, "mdi:toggle-switch"),
+    ("controls/var_enabled", "VAR Control Enabled", None, "mdi:toggle-switch"),
 ]
 
 # MPPT string sensor definitions (per string)
@@ -295,6 +305,10 @@ class MQTTPublisher:
                 self.config.username,
                 self.config.password
             )
+
+        # Set Last Will Testament for crash/disconnect detection
+        status_topic = f"{self.config.topic_prefix}/status"
+        self.client.will_set(status_topic, payload="offline", qos=1, retain=True)
 
         self.client.on_connect = self._on_connect
         self.client.on_disconnect = self._on_disconnect
@@ -718,13 +732,13 @@ class MQTTPublisher:
 
     def publish_status(self, status: str):
         """
-        Publish application status.
+        Publish application status (retained).
 
         Args:
             status: Status string ('online', 'offline', etc.)
         """
         topic = f"{self.config.topic_prefix}/status"
-        self.publish(topic, status)
+        self.publish(topic, status, retain=True)
 
     def _build_ha_device_info(self, device_type: str, device_id: str,
                               model: str = None, manufacturer: str = "Fronius",
@@ -826,6 +840,54 @@ class MQTTPublisher:
 
         return config
 
+    def _build_ha_binary_sensor_config(self, device_type: str, device_id: str,
+                                        sunspec_name: str, ha_name: str,
+                                        device_class: str = None, icon: str = None,
+                                        device_info: Dict = None) -> Dict:
+        """
+        Build Home Assistant binary sensor discovery config.
+
+        Args:
+            device_type: 'inverter', 'meter', or 'storage'
+            device_id: Device identifier
+            sunspec_name: SunSpec register name (used in state topic)
+            ha_name: Human-readable name for HA
+            device_class: HA device class (connectivity, running, etc.)
+            icon: MDI icon
+            device_info: Pre-built device info dict
+
+        Returns:
+            HA discovery config dictionary
+        """
+        # Build unique ID
+        safe_name = sunspec_name.lower().replace("/", "_")
+        unique_id = f"fronius_{device_type}_{device_id}_{safe_name}"
+
+        # Build state topic
+        state_topic = self._build_topic(device_type, device_id, sunspec_name)
+
+        # Build availability topic
+        availability_topic = f"{self.config.topic_prefix}/status"
+
+        config = {
+            "name": ha_name,
+            "state_topic": state_topic,
+            "availability_topic": availability_topic,
+            "unique_id": unique_id,
+            "origin": self._build_ha_origin(),
+            "payload_on": "True",
+            "payload_off": "False",
+        }
+
+        if device_class:
+            config["device_class"] = device_class
+        if icon:
+            config["icon"] = icon
+        if device_info:
+            config["device"] = device_info
+
+        return config
+
     def publish_ha_discovery_inverter(self, device_id: str, model: str = None,
                                        manufacturer: str = "Fronius",
                                        num_mppt_strings: int = 0,
@@ -865,6 +927,21 @@ class MQTTPublisher:
             if self._publish(discovery_topic, json.dumps(config), retain=True):
                 count += 1
 
+        # Publish inverter binary sensors
+        for sensor in HA_INVERTER_BINARY_SENSORS:
+            sunspec_name, ha_name, device_class, icon = sensor
+
+            config = self._build_ha_binary_sensor_config(
+                'inverter', device_id, sunspec_name, ha_name,
+                device_class, icon, device_info
+            )
+
+            safe_name = sunspec_name.lower().replace("/", "_")
+            discovery_topic = f"{HA_DISCOVERY_PREFIX}/binary_sensor/fronius/inverter_{device_id}/{safe_name}/config"
+
+            if self._publish(discovery_topic, json.dumps(config), retain=True):
+                count += 1
+
         # Publish controls sensors
         for sensor in HA_INVERTER_CONTROLS_SENSORS:
             sunspec_name, ha_name, unit, device_class, state_class, icon = sensor
@@ -876,6 +953,21 @@ class MQTTPublisher:
 
             safe_name = sunspec_name.lower().replace("/", "_")
             discovery_topic = f"{HA_DISCOVERY_PREFIX}/sensor/fronius/inverter_{device_id}/{safe_name}/config"
+
+            if self._publish(discovery_topic, json.dumps(config), retain=True):
+                count += 1
+
+        # Publish controls binary sensors
+        for sensor in HA_INVERTER_CONTROLS_BINARY_SENSORS:
+            sunspec_name, ha_name, device_class, icon = sensor
+
+            config = self._build_ha_binary_sensor_config(
+                'inverter', device_id, sunspec_name, ha_name,
+                device_class, icon, device_info
+            )
+
+            safe_name = sunspec_name.lower().replace("/", "_")
+            discovery_topic = f"{HA_DISCOVERY_PREFIX}/binary_sensor/fronius/inverter_{device_id}/{safe_name}/config"
 
             if self._publish(discovery_topic, json.dumps(config), retain=True):
                 count += 1

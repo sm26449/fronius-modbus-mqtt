@@ -20,6 +20,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Enable with `HA_DISCOVERY_ENABLED=true` environment variable
   - Or `mqtt.ha_discovery_enabled: true` in YAML config
   - Discovery configs are retained and published once at startup
+  - Binary sensors for status fields (`active`, `connected`, `*_enabled`)
+  - MQTT Last Will Testament (LWT) for crash detection - status automatically goes offline
 
 ## [1.2.4] - 2026-01-04
 
