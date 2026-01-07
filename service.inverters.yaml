@@ -87,6 +87,12 @@ variables:
     default: "INFO"
     description: "Log level: DEBUG, INFO, WARNING, ERROR"
 
+  # Home Assistant integration
+  FRONIUS_INV_HA_DISCOVERY_ENABLED:
+    default: "false"
+    description: "Enable Home Assistant MQTT autodiscovery"
+    prompt: true
+
 # Copy config files (same folder now)
 copy_files:
   - src: config/registers.json
@@ -113,6 +119,11 @@ compose: |
     image: fronius-modbus-mqtt:latest
     container_name: fronius-inverters
     restart: unless-stopped
+    depends_on:
+      mosquitto:
+        condition: service_started
+      influxdb:
+        condition: service_healthy
     command: ["python", "fronius_modbus_mqtt.py", "-d", "inverter"]
     environment:
       - TZ=${TZ}
@@ -134,6 +145,7 @@ compose: |
       - INFLUXDB_BUCKET=${FRONIUS_INV_INFLUXDB_BUCKET}
       - LOG_LEVEL=${FRONIUS_INV_LOG_LEVEL}
       - PING_CHECK_ENABLED=false
+      - HA_DISCOVERY_ENABLED=${FRONIUS_INV_HA_DISCOVERY_ENABLED}
     volumes:
       - ${DOCKER_ROOT}/fronius-inverters/config:/app/config:ro
       - ${DOCKER_ROOT}/fronius-inverters/data:/app/data
