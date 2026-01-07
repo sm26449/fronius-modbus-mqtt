@@ -1,17 +1,23 @@
 # Fronius Modbus MQTT
 
+[![Version](https://img.shields.io/badge/version-1.2.6-blue.svg)](CHANGELOG.md)
+[![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+
 Python application that reads data from Fronius inverters and smart meters via Modbus TCP and publishes to MQTT and/or InfluxDB.
 
 ## Features
 
-- **SunSpec Protocol Support** - Full SunSpec Modbus implementation with scale factors
-- **Multi-Device Support** - Poll multiple inverters and smart meters
+- **SunSpec Protocol Support** - Full SunSpec Modbus implementation with automatic scale factor handling
+- **Multi-Device Support** - Poll multiple inverters and smart meters simultaneously
+- **Home Assistant Integration** - MQTT autodiscovery for automatic entity creation
 - **MPPT Data** - Per-string voltage, current, and power (Model 160)
 - **Immediate Controls** - Read inverter control settings (Model 123)
 - **Event Parsing** - Decode Fronius event flags with human-readable descriptions
+- **Night Mode** - Automatic sleep detection when inverters go offline at night
+- **Connection Resilience** - Automatic retry with exponential backoff for Modbus, MQTT, and InfluxDB
 - **Publish Modes** - Publish on change or publish all values
 - **Docker Support** - Separate containers for inverters and meters
-- **MQTT Integration** - Publish to any MQTT broker with configurable topics
+- **MQTT Integration** - Publish to any MQTT broker with configurable topics and LWT
 - **InfluxDB Integration** - Time-series database storage with batching and rate limiting
 
 ## Quick Start
@@ -148,7 +154,20 @@ mqtt:
   topic_prefix: fronius        # Base topic
   retain: true                 # Retain messages
   qos: 0                       # QoS level (0, 1, 2)
+  ha_discovery_enabled: true   # Home Assistant MQTT autodiscovery
+  ha_discovery_prefix: homeassistant  # HA discovery topic prefix
 ```
+
+### Home Assistant Integration
+
+When `ha_discovery_enabled: true`, the application automatically registers all devices and entities in Home Assistant via MQTT autodiscovery.
+
+**Features:**
+- Automatic entity creation for all measurements
+- Proper device grouping (inverters, meters)
+- Correct device_class and state_class for energy dashboard
+- Availability tracking via LWT (Last Will Testament)
+- MPPT string sensors when available
 
 ### InfluxDB Settings
 
@@ -167,6 +186,33 @@ influxdb:
 1. Create a bucket named `fronius` in InfluxDB
 2. Create an API token with read/write permissions for the bucket
 3. Copy the token to your configuration
+
+## Environment Variables
+
+Configuration can also be set via environment variables (useful for Docker):
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `MODBUS_HOST` | Fronius DataManager IP | `192.168.1.100` |
+| `MODBUS_PORT` | Modbus TCP port | `502` |
+| `MODBUS_TIMEOUT` | Connection timeout (s) | `3` |
+| `INVERTER_IDS` | Comma-separated inverter IDs | `1` |
+| `METER_IDS` | Comma-separated meter IDs | `240` |
+| `MQTT_ENABLED` | Enable MQTT publishing | `true` |
+| `MQTT_BROKER` | MQTT broker address | `localhost` |
+| `MQTT_PORT` | MQTT broker port | `1883` |
+| `MQTT_USERNAME` | MQTT username | `` |
+| `MQTT_PASSWORD` | MQTT password | `` |
+| `MQTT_PREFIX` | MQTT topic prefix | `fronius` |
+| `HA_DISCOVERY_ENABLED` | Enable HA autodiscovery | `false` |
+| `INFLUXDB_ENABLED` | Enable InfluxDB | `false` |
+| `INFLUXDB_URL` | InfluxDB URL | `http://localhost:8086` |
+| `INFLUXDB_TOKEN` | InfluxDB API token | `` |
+| `INFLUXDB_ORG` | InfluxDB organization | `homelab` |
+| `INFLUXDB_BUCKET` | InfluxDB bucket | `fronius` |
+| `LOG_LEVEL` | Logging level | `INFO` |
+| `POLL_INTERVAL` | Polling interval (s) | `5` |
+| `PUBLISH_MODE` | `changed` or `all` | `changed` |
 
 ## Command Line Options
 
@@ -208,41 +254,58 @@ docker-compose ps
 
 ## MQTT Topics
 
+Topics use the Modbus unit ID (not serial number) for device identification.
+
+### Status Topic
+```
+fronius/status                    # "online" or "offline" (LWT)
+```
+
 ### Inverter Topics
 ```
-fronius/inverter/{serial}/ac_power
-fronius/inverter/{serial}/dc_power
-fronius/inverter/{serial}/ac_voltage_an
-fronius/inverter/{serial}/ac_voltage_bn
-fronius/inverter/{serial}/ac_voltage_cn
-fronius/inverter/{serial}/ac_current
-fronius/inverter/{serial}/ac_frequency
-fronius/inverter/{serial}/lifetime_energy
-fronius/inverter/{serial}/status
-fronius/inverter/{serial}/events
-fronius/inverter/{serial}/mppt/1/voltage
-fronius/inverter/{serial}/mppt/1/current
-fronius/inverter/{serial}/mppt/1/power
-fronius/inverter/{serial}/mppt/2/voltage
-fronius/inverter/{serial}/mppt/2/current
-fronius/inverter/{serial}/mppt/2/power
+fronius/inverter/{id}/W           # AC Power (W)
+fronius/inverter/{id}/DCW         # DC Power (W)
+fronius/inverter/{id}/PhVphA      # Phase A Voltage (V)
+fronius/inverter/{id}/PhVphB      # Phase B Voltage (V) - three-phase only
+fronius/inverter/{id}/PhVphC      # Phase C Voltage (V) - three-phase only
+fronius/inverter/{id}/A           # AC Current (A)
+fronius/inverter/{id}/Hz          # Frequency (Hz)
+fronius/inverter/{id}/WH          # Lifetime Energy (Wh)
+fronius/inverter/{id}/PF          # Power Factor (-1.0 to 1.0)
+fronius/inverter/{id}/St          # Status Code
+fronius/inverter/{id}/status      # Status Description
+fronius/inverter/{id}/events      # Active Events (JSON)
+fronius/inverter/{id}/mppt/1/DCV  # MPPT1 Voltage (V)
+fronius/inverter/{id}/mppt/1/DCA  # MPPT1 Current (A)
+fronius/inverter/{id}/mppt/1/DCW  # MPPT1 Power (W)
+fronius/inverter/{id}/mppt/2/DCV  # MPPT2 Voltage (V)
+fronius/inverter/{id}/mppt/2/DCA  # MPPT2 Current (A)
+fronius/inverter/{id}/mppt/2/DCW  # MPPT2 Power (W)
 ```
 
 ### Meter Topics
 ```
-fronius/meter/{serial}/power_total
-fronius/meter/{serial}/power_a
-fronius/meter/{serial}/power_b
-fronius/meter/{serial}/power_c
-fronius/meter/{serial}/voltage_an
-fronius/meter/{serial}/voltage_bn
-fronius/meter/{serial}/voltage_cn
-fronius/meter/{serial}/current_a
-fronius/meter/{serial}/current_b
-fronius/meter/{serial}/current_c
-fronius/meter/{serial}/frequency
-fronius/meter/{serial}/energy_exported
-fronius/meter/{serial}/energy_imported
+fronius/meter/{id}/W              # Total Power (W)
+fronius/meter/{id}/WphA           # Phase A Power (W)
+fronius/meter/{id}/WphB           # Phase B Power (W)
+fronius/meter/{id}/WphC           # Phase C Power (W)
+fronius/meter/{id}/PhVphA         # Phase A Voltage (V)
+fronius/meter/{id}/PhVphB         # Phase B Voltage (V)
+fronius/meter/{id}/PhVphC         # Phase C Voltage (V)
+fronius/meter/{id}/AphA           # Phase A Current (A)
+fronius/meter/{id}/AphB           # Phase B Current (A)
+fronius/meter/{id}/AphC           # Phase C Current (A)
+fronius/meter/{id}/Hz             # Frequency (Hz)
+fronius/meter/{id}/PF             # Power Factor (-1.0 to 1.0)
+fronius/meter/{id}/TotWhExp       # Total Energy Exported (Wh)
+fronius/meter/{id}/TotWhImp       # Total Energy Imported (Wh)
+```
+
+### Example
+For inverter with Modbus ID 1 and meter with ID 240:
+```
+fronius/inverter/1/W              # Inverter power
+fronius/meter/240/W               # Meter power
 ```
 
 ## InfluxDB Measurements
@@ -303,13 +366,25 @@ fronius-modbus-mqtt/
 
 ## Supported Devices
 
-Tested with:
-- Fronius Symo 17.5-3-M
-- Fronius Symo Advanced 17.5-3-M
-- Fronius Symo Advanced 20.0-3-M
-- Fronius Smart Meter TS 5kA-3
+### Inverters (Tested)
+| Model | Type | Notes |
+|-------|------|-------|
+| Fronius Primo 3.0-1 | Single-phase | Model 101 |
+| Fronius Primo 5.0-1 | Single-phase | Model 101 |
+| Fronius Symo 17.5-3-M | Three-phase | Model 103 |
+| Fronius Symo Advanced 17.5-3-M | Three-phase | Model 103 |
+| Fronius Symo Advanced 20.0-3-M | Three-phase | Model 103 |
 
-Should work with any Fronius inverter with Modbus TCP enabled via DataManager.
+### Smart Meters (Tested)
+| Model | Type | Notes |
+|-------|------|-------|
+| Fronius Smart Meter TS 5kA-3 | Three-phase | Model 203 |
+| Fronius Smart Meter 63A-1 | Single-phase | Model 201 |
+
+### Compatibility
+Should work with any Fronius device that supports:
+- Modbus TCP via DataManager 2.0 or integrated DataManager
+- SunSpec protocol (Models 1, 101-103, 123, 160, 201-204)
 
 ## Troubleshooting
 
@@ -380,7 +455,7 @@ Found a bug or have a feature request? Please open an issue on [GitHub Issues](h
 
 MIT License - Free and open source software.
 
-Copyright (c) 2024 Stefan M <sm26449@diysolar.ro>
+Copyright (c) 2024-2026 Stefan M <sm26449@diysolar.ro>
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
