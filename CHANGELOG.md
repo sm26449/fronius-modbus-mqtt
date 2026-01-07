@@ -14,6 +14,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Now detects format by checking raw value magnitude: abs(raw) > 100 uses SF=-4
   - Works correctly for both Symo (low precision) and Primo (high precision) inverters
 
+### Tested Devices
+- Fronius Primo (single-phase, Model 101)
+- Fronius Smart Meter 63A-1 (single-phase, Model 201)
+
 ## [1.2.5] - 2026-01-07
 
 ### Added
