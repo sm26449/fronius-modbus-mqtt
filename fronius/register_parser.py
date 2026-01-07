@@ -233,10 +233,19 @@ class RegisterParser:
         # Apparent/Reactive Power
         data['apparent_power'] = self.apply_scale_factor(self.decode_int16(registers[16]), sf_va)
         data['reactive_power'] = self.apply_scale_factor(self.decode_int16(registers[18]), sf_var)
-        # Note: Fronius reports PF as percentage (0-100) but SF may be 0 instead of -2
-        if sf_pf == 0:
-            sf_pf = -2  # Force correct scale for percentage format
-        data['power_factor'] = self.apply_scale_factor(self.decode_int16(registers[20]), sf_pf)
+
+        # Power Factor: Fronius devices report PF inconsistently
+        # - Symo: percentage format (0-100), SF may be 0 or -2
+        # - Primo: higher precision (0-10000), SF=-2 but needs -4
+        # Detect format by checking raw value magnitude regardless of reported SF
+        pf_raw = self.decode_int16(registers[20])
+        if pf_raw is not None and abs(pf_raw) > 100:
+            # High precision format - force SF=-4 to get value in -1.0 to 1.0 range
+            sf_pf = -4
+        elif sf_pf == 0:
+            # Zero SF with low precision value - use -2
+            sf_pf = -2
+        data['power_factor'] = self.apply_scale_factor(pf_raw, sf_pf)
 
         # Lifetime Energy
         data['lifetime_energy'] = self.apply_scale_factor(

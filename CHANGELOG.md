@@ -5,6 +5,15 @@ All notable changes to Fronius Modbus MQTT will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.6] - 2026-01-07
+
+### Fixed
+- **Power Factor Scale for Primo Inverters**
+  - Primo inverters report PF in high-precision format (0-10000) with SF=-2
+  - This caused PF values ~100x too high (e.g., -99.95 instead of -0.9995)
+  - Now detects format by checking raw value magnitude: abs(raw) > 100 uses SF=-4
+  - Works correctly for both Symo (low precision) and Primo (high precision) inverters
+
 ## [1.2.5] - 2026-01-07
 
 ### Added

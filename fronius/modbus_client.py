@@ -536,10 +536,14 @@ class DevicePoller(threading.Thread):
         wmax_ena = regs[9]
 
         # Power factor
-        # Note: Fronius reports PF as percentage but SF may be 0 instead of -2
-        if sf_pf == 0:
-            sf_pf = -2  # Force correct scale for percentage format
+        # Fronius devices report PF inconsistently:
+        # - Symo: percentage format (0-100), SF may be 0 or -2
+        # - Primo: higher precision (0-10000), SF=-2 but needs -4
         pf_raw = regs[10] if regs[10] < 32768 else regs[10] - 65536
+        if regs[10] != 0xFFFF and abs(pf_raw) > 100:
+            sf_pf = -4  # High precision format - force correct scale
+        elif sf_pf == 0:
+            sf_pf = -2  # Zero SF with low precision value
         pf = pf_raw * (10 ** sf_pf) if regs[10] != 0xFFFF else None
         pf_win_tms = regs[11]
         pf_rvrt_tms = regs[12]
