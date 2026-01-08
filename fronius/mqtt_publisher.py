@@ -331,6 +331,8 @@ class MQTTPublisher:
         self.connected = False
         if reason_code != 0:
             self.log.warning(f"MQTT disconnected unexpectedly: {reason_code}")
+            # Start background reconnection
+            self._start_reconnect_thread()
 
     def _try_connect(self) -> bool:
         """
@@ -502,11 +504,23 @@ class MQTTPublisher:
             if result.rc == mqtt.MQTT_ERR_SUCCESS:
                 self.messages_published += 1
                 return True
+            elif result.rc in (mqtt.MQTT_ERR_NO_CONN, mqtt.MQTT_ERR_CONN_LOST):
+                # Connection lost during publish
+                self.log.warning("MQTT connection lost during publish")
+                self.connected = False
+                self._start_reconnect_thread()
 
             return False
 
         except Exception as e:
-            self.log.error(f"MQTT publish error: {e}")
+            error_str = str(e).lower()
+            # Check for connection-related errors
+            if any(err in error_str for err in ['connection', 'socket', 'broken pipe']):
+                self.log.warning(f"MQTT connection error during publish: {e}")
+                self.connected = False
+                self._start_reconnect_thread()
+            else:
+                self.log.error(f"MQTT publish error: {e}")
             return False
 
     def publish(self, topic: str, value: Any, retain: bool = None) -> bool:

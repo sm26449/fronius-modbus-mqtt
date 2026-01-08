@@ -64,6 +64,18 @@ class InfluxDBPublisher:
         try:
             from influxdb_client import InfluxDBClient, WriteOptions
 
+            # Clean up old connections first
+            if self.write_api:
+                try:
+                    self.write_api.close()
+                except Exception:
+                    pass
+            if self.client:
+                try:
+                    self.client.close()
+                except Exception:
+                    pass
+
             self.client = InfluxDBClient(
                 url=self.config.url,
                 token=self.config.token,
