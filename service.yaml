@@ -7,12 +7,14 @@ dependencies:
     variables:
       FRONIUS_MQTT_BROKER: "${HOST}"
       FRONIUS_MQTT_PORT: "${PORT}"
+      MOSQUITTO_SERVICE: "${SERVICE_NAME}"
     credentials:
       FRONIUS_MQTT_USERNAME: "MQTT_USERNAME"
       FRONIUS_MQTT_PASSWORD: "MQTT_PASSWORD"
   - name: influxdb
     variables:
       FRONIUS_INFLUXDB_URL: "http://${HOST}:${PORT}"
+      INFLUXDB_SERVICE: "${SERVICE_NAME}"
     credentials:
       FRONIUS_INFLUXDB_TOKEN: "DOCKER_INFLUXDB_INIT_ADMIN_TOKEN"
       FRONIUS_INFLUXDB_ORG: "DOCKER_INFLUXDB_INIT_ORG"
@@ -95,6 +97,14 @@ variables:
     description: "Enable Home Assistant MQTT autodiscovery"
     prompt: true
 
+  # Service dependencies (for depends_on)
+  MOSQUITTO_SERVICE:
+    default: "mosquitto"
+    description: "Mosquitto service name"
+  INFLUXDB_SERVICE:
+    default: "influxdb"
+    description: "InfluxDB service name"
+
 # Copy config files from template (optional - env vars can override)
 copy_files:
   - src: config/registers.json
@@ -114,17 +124,17 @@ hooks:
     - "docker logs ${CONTAINER_NAME} --tail 5 2>/dev/null || true"
 
 compose: |
-  fronius-modbus-mqtt:
+  ${SERVICE_NAME}:
     build:
       context: .
       dockerfile: Dockerfile
     image: fronius-modbus-mqtt:latest
-    container_name: fronius-modbus-mqtt
+    container_name: ${SERVICE_NAME}
     restart: unless-stopped
     depends_on:
-      mosquitto:
+      ${MOSQUITTO_SERVICE}:
         condition: service_started
-      influxdb:
+      ${INFLUXDB_SERVICE}:
         condition: service_healthy
     command: ["python", "fronius_modbus_mqtt.py", "-d", "all"]
     environment:
@@ -149,9 +159,9 @@ compose: |
       - PING_CHECK_ENABLED=false
       - HA_DISCOVERY_ENABLED=${FRONIUS_HA_DISCOVERY_ENABLED}
     volumes:
-      - ${DOCKER_ROOT}/fronius-modbus-mqtt/config:/app/config:ro
-      - ${DOCKER_ROOT}/fronius-modbus-mqtt/data:/app/data
-      - ${DOCKER_ROOT}/fronius-modbus-mqtt/logs:/app/logs
+      - ${DOCKER_ROOT}/${SERVICE_NAME}/config:/app/config:ro
+      - ${DOCKER_ROOT}/${SERVICE_NAME}/data:/app/data
+      - ${DOCKER_ROOT}/${SERVICE_NAME}/logs:/app/logs
     healthcheck:
       test: ["CMD", "python", "/app/healthcheck.py"]
       interval: 60s
