@@ -5,7 +5,19 @@ All notable changes to Fronius Modbus MQTT will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.2.6] - 2026-01-07
+## [1.2.6] - 2026-01-11
+
+### Added
+- **Config Auto-Initialization**
+  - New entrypoint.sh script that initializes config from defaults on first run
+  - Default config is bundled in `/app/config.default/` inside the image
+  - If mounted `/app/config` volume is empty, defaults are copied automatically
+  - Eliminates need to manually copy config files before first start
+
+### Changed
+- **Config Volume Now Writable**
+  - Removed `:ro` (read-only) flag from config volume mount in service templates
+  - Allows container to write default config to mounted volume
 
 ### Fixed
 - **Power Factor Scale for Primo Inverters**
@@ -231,6 +243,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 | Version | Date | Highlights |
 |---------|------|------------|
+| 1.2.6 | 2026-01-11 | Config auto-initialization, writable config volume |
 | 1.2.5 | 2026-01-07 | Home Assistant MQTT autodiscovery with hierarchical topics |
 | 1.2.4 | 2026-01-04 | Power Factor scale correction (was 100x too high) |
 | 1.2.3 | 2026-01-04 | Connection retry logic for Modbus, MQTT, InfluxDB |

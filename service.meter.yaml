@@ -157,7 +157,7 @@ compose: |
       - PING_CHECK_ENABLED=false
       - HA_DISCOVERY_ENABLED=${FRONIUS_MTR_HA_DISCOVERY_ENABLED}
     volumes:
-      - ${DOCKER_ROOT}/${SERVICE_NAME}/config:/app/config:ro
+      - ${DOCKER_ROOT}/${SERVICE_NAME}/config:/app/config
       - ${DOCKER_ROOT}/${SERVICE_NAME}/data:/app/data
       - ${DOCKER_ROOT}/${SERVICE_NAME}/logs:/app/logs
     healthcheck:
