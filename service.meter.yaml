@@ -117,9 +117,8 @@ hooks:
     - "mkdir -p ${SERVICE_DATA}/data ${SERVICE_DATA}/logs"
   post_deploy:
     - "echo 'Fronius Meter service deployed successfully'"
-    # Create InfluxDB bucket in stack influxdb container (if exists)
-    - "docker exec ${STACK}-influxdb influx bucket create -n '${FRONIUS_MTR_INFLUXDB_BUCKET}' -o '${FRONIUS_MTR_INFLUXDB_ORG}' 2>/dev/null && echo '✓ InfluxDB bucket ${FRONIUS_MTR_INFLUXDB_BUCKET} created' || true"
-    - "docker logs ${CONTAINER_NAME} --tail 5 2>/dev/null || true"
+    # Bucket creation is handled in container entrypoint.sh
+    - "sleep 3 && docker logs ${CONTAINER_NAME} --tail 10 2>/dev/null || true"
 
 compose: |
   ${SERVICE_NAME}:

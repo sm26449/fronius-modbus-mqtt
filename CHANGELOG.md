@@ -5,6 +5,15 @@ All notable changes to Fronius Modbus MQTT will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.7] - 2026-01-11
+
+### Changed
+- **InfluxDB Bucket Creation Moved to Container Entrypoint**
+  - Bucket creation now happens inside container startup instead of post_deploy hooks
+  - Waits for InfluxDB availability (up to 30 seconds) before creating bucket
+  - More reliable than external docker exec commands
+  - Bucket is created via InfluxDB API with proper error handling
+
 ## [1.2.6] - 2026-01-11
 
 ### Added
@@ -243,6 +252,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 | Version | Date | Highlights |
 |---------|------|------------|
+| 1.2.7 | 2026-01-11 | InfluxDB bucket creation in container entrypoint |
 | 1.2.6 | 2026-01-11 | Config auto-initialization, writable config volume |
 | 1.2.5 | 2026-01-07 | Home Assistant MQTT autodiscovery with hierarchical topics |
 | 1.2.4 | 2026-01-04 | Power Factor scale correction (was 100x too high) |
