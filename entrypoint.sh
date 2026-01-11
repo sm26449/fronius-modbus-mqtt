@@ -31,18 +31,25 @@ if [ "${INFLUXDB_ENABLED}" = "true" ] && [ -n "${INFLUXDB_URL}" ] && [ -n "${INF
     if [ $RETRY_COUNT -ge $MAX_RETRIES ]; then
         echo "Warning: InfluxDB not available after $MAX_RETRIES seconds, skipping bucket creation"
     else
-        # Check if bucket exists
-        BUCKET_EXISTS=$(curl -s -H "Authorization: Token ${INFLUXDB_TOKEN}" \
-            "${INFLUXDB_URL}/api/v2/buckets?name=${INFLUXDB_BUCKET}&org=${INFLUXDB_ORG}" \
-            | grep -c "\"name\":\"${INFLUXDB_BUCKET}\"" || echo "0")
+        # Check if bucket exists (look for "buckets":[ with content, not error message)
+        BUCKET_RESPONSE=$(curl -s -H "Authorization: Token ${INFLUXDB_TOKEN}" \
+            "${INFLUXDB_URL}/api/v2/buckets?name=${INFLUXDB_BUCKET}&org=${INFLUXDB_ORG}")
+
+        # Check if response contains "not found" error (handle multiline JSON)
+        if echo "$BUCKET_RESPONSE" | grep -q 'not found'; then
+            BUCKET_EXISTS="0"
+        else
+            BUCKET_EXISTS="1"
+        fi
 
         if [ "$BUCKET_EXISTS" = "0" ]; then
             echo "Creating InfluxDB bucket: ${INFLUXDB_BUCKET}"
 
-            # Get org ID
-            ORG_ID=$(curl -s -H "Authorization: Token ${INFLUXDB_TOKEN}" \
-                "${INFLUXDB_URL}/api/v2/orgs?org=${INFLUXDB_ORG}" \
-                | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
+            # Get org ID from bucket list (we have bucket permissions, not org permissions)
+            # Query all buckets and extract orgID from any existing bucket
+            ALL_BUCKETS=$(curl -s -H "Authorization: Token ${INFLUXDB_TOKEN}" \
+                "${INFLUXDB_URL}/api/v2/buckets" | tr -d '\t\n')
+            ORG_ID=$(echo "$ALL_BUCKETS" | grep -o '"orgID": *"[^"]*"' | head -1 | sed 's/.*"\([^"]*\)"$/\1/')
 
             if [ -n "$ORG_ID" ]; then
                 # Create bucket
@@ -51,7 +58,8 @@ if [ "${INFLUXDB_ENABLED}" = "true" ] && [ -n "${INFLUXDB_URL}" ] && [ -n "${INF
                     -H "Content-Type: application/json" \
                     -d "{\"name\":\"${INFLUXDB_BUCKET}\",\"orgID\":\"${ORG_ID}\",\"retentionRules\":[]}")
 
-                if echo "$RESULT" | grep -q "\"name\":\"${INFLUXDB_BUCKET}\""; then
+                # Check for success - look for bucket name in response (handles spaces in JSON)
+                if echo "$RESULT" | grep -q "\"name\": *\"${INFLUXDB_BUCKET}\""; then
                     echo "✓ InfluxDB bucket '${INFLUXDB_BUCKET}' created successfully"
                 else
                     echo "Warning: Could not create bucket - $RESULT"
