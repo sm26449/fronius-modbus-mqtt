@@ -1,6 +1,6 @@
 # Fronius Modbus MQTT
 
-[![Version](https://img.shields.io/badge/version-1.2.6-blue.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-1.2.7-blue.svg)](CHANGELOG.md)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
 Python application that reads data from Fronius inverters and smart meters via Modbus TCP and publishes to MQTT and/or InfluxDB.
@@ -183,9 +183,9 @@ influxdb:
 ```
 
 **InfluxDB Setup:**
-1. Create a bucket named `fronius` in InfluxDB
-2. Create an API token with read/write permissions for the bucket
-3. Copy the token to your configuration
+1. Create an API token with read/write permissions for buckets
+2. Copy the token to your configuration
+3. The bucket specified in `INFLUXDB_BUCKET` is automatically created on container startup if it doesn't exist
 
 ## Environment Variables
 

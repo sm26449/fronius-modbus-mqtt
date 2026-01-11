@@ -14,6 +14,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - More reliable than external docker exec commands
   - Bucket is created via InfluxDB API with proper error handling
 
+### Fixed
+- **InfluxDB Bucket Detection**
+  - Fixed bucket existence check to properly handle JSON responses with spaces/newlines
+  - Extracts org ID from bucket list instead of org API (works with bucket-only permissions)
+  - Added curl as system dependency in Dockerfile for API calls
+
 ## [1.2.6] - 2026-01-11
 
 ### Added
