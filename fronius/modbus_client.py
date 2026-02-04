@@ -348,6 +348,8 @@ class DevicePoller(threading.Thread):
             state.backoff_until = None
 
         # Maybe verify model_id periodically (outside lock - involves I/O)
+        # Note: state reference is safe here because DeviceRuntimeState objects
+        # are never replaced in _device_runtime dict, only modified in-place
         self._maybe_verify_model_id(device_info, device_type, state)
 
     def _update_runtime_on_failure(self, device_info: Dict, device_type: str):
@@ -381,6 +383,7 @@ class DevicePoller(threading.Thread):
                 should_verify_model = True
 
         # Trigger model_id verification outside lock (involves I/O)
+        # Note: state reference is safe - see comment in _update_runtime_on_success
         if should_verify_model:
             self._verify_model_id(device_info, device_type, state, reason="consecutive errors")
 

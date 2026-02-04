@@ -149,7 +149,7 @@ HA_MPPT_STRING_SENSORS = [
 HA_RUNTIME_SENSORS = [
     ("runtime/status", "Runtime Status", None, None, None, "mdi:heart-pulse"),
     ("runtime/last_seen", "Last Seen", None, "timestamp", None, "mdi:clock-outline"),
-    ("runtime/read_errors", "Read Errors", None, None, "total_increasing", "mdi:alert-circle"),
+    ("runtime/read_errors", "Read Errors", None, None, None, "mdi:alert-circle"),
     ("runtime/uptime", "Uptime", None, None, None, "mdi:timer-outline"),
     ("runtime/model_id", "Model ID", None, None, None, "mdi:identifier"),
 ]
@@ -1122,18 +1122,18 @@ class MQTTPublisher:
 
         base = f"{self.config.topic_prefix}/{device_type}/{device_id}/runtime"
 
-        # Publish runtime fields
+        # Publish runtime fields (retained for HA to get last state on reconnect)
         if 'status' in runtime_data:
-            self.publish_if_changed(f"{base}/status", runtime_data['status'])
+            self.publish_if_changed(f"{base}/status", runtime_data['status'], retain=True)
         if 'last_seen' in runtime_data and runtime_data['last_seen']:
-            self.publish_if_changed(f"{base}/last_seen", runtime_data['last_seen'])
+            self.publish_if_changed(f"{base}/last_seen", runtime_data['last_seen'], retain=True)
         if 'read_errors' in runtime_data:
-            self.publish_if_changed(f"{base}/read_errors", runtime_data['read_errors'])
+            self.publish_if_changed(f"{base}/read_errors", runtime_data['read_errors'], retain=True)
         if 'model_id' in runtime_data and runtime_data['model_id'] is not None:
-            self.publish_if_changed(f"{base}/model_id", runtime_data['model_id'])
+            self.publish_if_changed(f"{base}/model_id", runtime_data['model_id'], retain=True)
 
         # Uptime is container-wide, same for all devices
-        self.publish_if_changed(f"{base}/uptime", uptime)
+        self.publish_if_changed(f"{base}/uptime", uptime, retain=True)
 
     def publish_ha_discovery_runtime(self, device_type: str, device_id: str,
                                       model: str = None, manufacturer: str = "Fronius",

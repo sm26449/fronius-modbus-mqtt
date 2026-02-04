@@ -329,13 +329,15 @@ class FroniusModbusMQTT:
 
         # Publish per-device runtime
         for key, device_data in stats['devices'].items():
-            # Parse key to get device_type and device_id
+            # Parse key to get device_type and device_id (format: "inverter_1" or "meter_240")
             parts = key.split('_', 1)
             if len(parts) == 2:
                 device_type, device_id = parts
                 self.mqtt_publisher.publish_device_runtime(
                     device_type, device_id, device_data, uptime
                 )
+            else:
+                self.log.debug(f"Unexpected runtime key format: {key}")
 
     def _main_loop(self):
         """Main loop - just keeps the app running while threads poll"""
