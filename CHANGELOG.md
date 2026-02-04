@@ -30,6 +30,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - Health file now includes `uptime` field
 
+### Fixed
+- **Model ID Reading from DataManager Buffer**
+  - Fronius DataManager buffer could retain residual SunSpec header data (0x5365 = "Se")
+  - This caused invalid model_id values (e.g., 21365 instead of 103) for some inverters
+  - Fix: Force TCP reconnection before reading model_id to clear stale buffer
+  - Added retry logic (up to 3 attempts) with validation against known SunSpec models
+  - Valid models: 101-103, 111-113 (inverters), 201-204 (meters)
+- **Aggregate Status Publishing**
+  - Fixed fronius-meter container incorrectly publishing "offline" for inverter aggregate status
+  - Aggregate status now only published for device types with at least one device
+
 ## [1.2.7] - 2026-01-11
 
 ### Changed
