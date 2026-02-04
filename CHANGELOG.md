@@ -5,6 +5,31 @@ All notable changes to Fronius Modbus MQTT will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.0] - 2026-02-04
+
+### Added
+- **Runtime Monitoring**
+  - Per-device online/offline status tracking with automatic detection
+  - Device marked offline after 3 consecutive read failures
+  - Aggregate status for device types: "online", "partial", or "offline"
+  - Cumulative read error counter per device
+  - Last seen timestamp (ISO format) per device
+  - Container uptime display (format: "Xd Xh Xm")
+  - Periodic model_id re-verification (hourly) to detect configuration drift
+  - Model_id verification triggered after 5 consecutive errors
+  - Exponential backoff for offline devices (10s → 20s → 40s → 60s max)
+  - New MQTT topics:
+    - `fronius/inverter/status` - Aggregate inverter status
+    - `fronius/meter/status` - Aggregate meter status
+    - `fronius/inverter/{id}/runtime/*` - Per-device runtime stats
+    - `fronius/meter/{id}/runtime/*` - Per-device runtime stats
+  - Home Assistant autodiscovery for runtime sensors (entity_category: diagnostic)
+  - Thread-safe runtime state tracking with proper locking
+  - Uptime added to health file for Docker healthcheck
+
+### Changed
+- Health file now includes `uptime` field
+
 ## [1.2.7] - 2026-01-11
 
 ### Changed
@@ -258,6 +283,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 | Version | Date | Highlights |
 |---------|------|------------|
+| 1.3.0 | 2026-02-04 | Runtime monitoring with per-device status, error tracking, uptime |
 | 1.2.7 | 2026-01-11 | InfluxDB bucket creation in container entrypoint |
 | 1.2.6 | 2026-01-11 | Config auto-initialization, writable config volume |
 | 1.2.5 | 2026-01-07 | Home Assistant MQTT autodiscovery with hierarchical topics |

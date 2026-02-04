@@ -12,6 +12,7 @@ import logging
 import threading
 import subprocess
 import platform
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Dict, List, Optional, Callable
 
@@ -21,6 +22,20 @@ from pymodbus.exceptions import ModbusException
 from .config import ModbusConfig, DevicesConfig
 from .register_parser import RegisterParser
 from .logging_setup import get_logger
+
+
+@dataclass
+class DeviceRuntimeState:
+    """Runtime state tracking for a single device."""
+    device_id: int
+    device_type: str  # 'inverter' or 'meter'
+    status: str = "offline"
+    last_seen: Optional[datetime] = None
+    read_errors: int = 0
+    consecutive_errors: int = 0
+    model_id: Optional[int] = None
+    model_id_verified_at: Optional[datetime] = None
+    backoff_until: Optional[float] = None  # timestamp when to retry
 
 # Suppress pymodbus exception logging
 logging.getLogger("pymodbus").setLevel(logging.CRITICAL)
@@ -267,15 +282,199 @@ class DevicePoller(threading.Thread):
         # Track last controls read time per inverter
         self._last_controls_read: Dict[int, float] = {}
 
+        # Per-device runtime tracking
+        self._device_runtime: Dict[str, DeviceRuntimeState] = {}
+        self._runtime_lock = threading.Lock()  # Thread safety for runtime dict
+        self._model_id_verify_interval = 3600  # Re-verify every hour
+        self._model_id_verify_on_errors = 5    # Or after N consecutive errors
+
         # Night/sleep mode tracking
         self._consecutive_failures = 0
         self._in_sleep_mode = False
         self._last_successful_poll = time.time()
         self._sleep_mode_start = None
 
+    def _runtime_key(self, device_id: int, device_type: str) -> str:
+        """Generate unique key for device runtime tracking."""
+        return f"{device_type}_{device_id}"
+
+    def _init_runtime_state(self, device_info: Dict, device_type: str) -> DeviceRuntimeState:
+        """Initialize or get runtime state for a device. Must be called with _runtime_lock held."""
+        key = self._runtime_key(device_info['device_id'], device_type)
+        if key not in self._device_runtime:
+            self._device_runtime[key] = DeviceRuntimeState(
+                device_id=device_info['device_id'],
+                device_type=device_type,
+                model_id=device_info.get('model_id')
+            )
+        return self._device_runtime[key]
+
+    def _get_backoff_delay(self, consecutive_errors: int) -> int:
+        """Calculate backoff delay based on consecutive errors."""
+        if consecutive_errors < 3:
+            return 0
+        extra_errors = consecutive_errors - 3
+        delay = min(10 * (2 ** extra_errors), 60)  # max 60s
+        return delay
+
+    def _update_runtime_on_success(self, device_info: Dict, device_type: str):
+        """Update runtime state after successful read."""
+        with self._runtime_lock:
+            state = self._init_runtime_state(device_info, device_type)
+            state.status = "online"
+            state.last_seen = datetime.now()
+            state.consecutive_errors = 0
+            state.backoff_until = None
+
+        # Maybe verify model_id periodically (outside lock - involves I/O)
+        self._maybe_verify_model_id(device_info, device_type, state)
+
+    def _update_runtime_on_failure(self, device_info: Dict, device_type: str):
+        """Update runtime state after failed read."""
+        should_verify_model = False
+        with self._runtime_lock:
+            state = self._init_runtime_state(device_info, device_type)
+            state.read_errors += 1
+            state.consecutive_errors += 1
+
+            # Device becomes offline after 3 consecutive errors
+            if state.consecutive_errors >= 3:
+                if state.status != "offline":
+                    self.log.warning(
+                        f"{device_type.title()} {device_info['device_id']}: "
+                        f"marked offline after {state.consecutive_errors} consecutive errors"
+                    )
+                state.status = "offline"
+
+                # Set backoff for offline device
+                delay = self._get_backoff_delay(state.consecutive_errors)
+                if delay > 0:
+                    state.backoff_until = time.time() + delay
+                    self.log.debug(
+                        f"{device_type.title()} {device_info['device_id']}: "
+                        f"backoff {delay}s after {state.consecutive_errors} errors"
+                    )
+
+            # Check if model_id verification needed
+            if state.consecutive_errors >= self._model_id_verify_on_errors:
+                should_verify_model = True
+
+        # Trigger model_id verification outside lock (involves I/O)
+        if should_verify_model:
+            self._verify_model_id(device_info, device_type, state, reason="consecutive errors")
+
+    def _maybe_verify_model_id(self, device_info: Dict, device_type: str, state: DeviceRuntimeState):
+        """Check if model_id needs periodic re-verification."""
+        now = datetime.now()
+        should_verify = False
+
+        with self._runtime_lock:
+            if state.model_id_verified_at is None:
+                state.model_id_verified_at = now
+                return
+
+            elapsed = (now - state.model_id_verified_at).total_seconds()
+            if elapsed >= self._model_id_verify_interval:
+                should_verify = True
+
+        if should_verify:
+            self._verify_model_id(device_info, device_type, state, reason="periodic check")
+
+    def _verify_model_id(self, device_info: Dict, device_type: str,
+                         state: DeviceRuntimeState, reason: str = ""):
+        """Re-read and verify model_id from device."""
+        unit_id = device_info['device_id']
+        model_regs = self.connection.read_registers(40070, 1, unit_id)
+
+        if model_regs:
+            new_model_id = model_regs[0]
+
+            with self._runtime_lock:
+                old_model_id = state.model_id
+
+                if old_model_id is not None and new_model_id != old_model_id:
+                    self.log.warning(
+                        f"{device_type.title()} {unit_id}: model_id changed from "
+                        f"{old_model_id} to {new_model_id} ({reason})"
+                    )
+                    # Update device_info with new model_id
+                    device_info['model_id'] = new_model_id
+
+                state.model_id = new_model_id
+                state.model_id_verified_at = datetime.now()
+
+            self.log.debug(f"{device_type.title()} {unit_id}: model_id verified = {new_model_id}")
+
+    def _is_device_in_backoff(self, device_info: Dict, device_type: str) -> bool:
+        """Check if device is currently in backoff period."""
+        key = self._runtime_key(device_info['device_id'], device_type)
+        with self._runtime_lock:
+            state = self._device_runtime.get(key)
+            if state and state.backoff_until and time.time() < state.backoff_until:
+                return True
+        return False
+
+    def _calc_aggregate_status(self, online: int, total: int) -> str:
+        """Calculate aggregate status from online/total counts."""
+        if total == 0:
+            return "offline"
+        if online == total:
+            return "online"
+        if online == 0:
+            return "offline"
+        return "partial"
+
+    def get_runtime_stats(self) -> Dict:
+        """
+        Get runtime statistics for all devices.
+
+        Returns dict with:
+        - inverter_status: aggregate status for inverters
+        - meter_status: aggregate status for meters
+        - devices: dict of device runtime info
+        """
+        inverter_online = 0
+        inverter_total = 0
+        meter_online = 0
+        meter_total = 0
+        devices = {}
+
+        with self._runtime_lock:
+            for key, state in self._device_runtime.items():
+                device_data = {
+                    'status': state.status,
+                    'last_seen': state.last_seen.isoformat() if state.last_seen else None,
+                    'read_errors': state.read_errors,
+                    'model_id': state.model_id,
+                }
+                devices[key] = device_data
+
+                if state.device_type == 'inverter':
+                    inverter_total += 1
+                    if state.status == 'online':
+                        inverter_online += 1
+                elif state.device_type == 'meter':
+                    meter_total += 1
+                    if state.status == 'online':
+                        meter_online += 1
+
+        return {
+            'inverter_status': self._calc_aggregate_status(inverter_online, inverter_total),
+            'meter_status': self._calc_aggregate_status(meter_online, meter_total),
+            'inverter_online': inverter_online,
+            'inverter_total': inverter_total,
+            'meter_online': meter_online,
+            'meter_total': meter_total,
+            'devices': devices,
+        }
+
     def _poll_inverter(self, device_info: Dict, max_retries: int = 3) -> bool:
         """Poll a single inverter with retry on failure."""
         unit_id = device_info['device_id']
+
+        # Check if device is in backoff period (offline with exponential delay)
+        if self._is_device_in_backoff(device_info, 'inverter'):
+            return False
 
         # Read main registers (40072-40120) with retry
         regs = None
@@ -292,6 +491,7 @@ class DevicePoller(threading.Thread):
                 self.log.warning(f"Inverter {unit_id}: main register read failed after {max_retries} attempts")
                 # Force reconnect on next read to clear any buffer issues
                 self.connection.connected = False
+                self._update_runtime_on_failure(device_info, 'inverter')
                 return False
 
         # Parse data
@@ -364,6 +564,7 @@ class DevicePoller(threading.Thread):
 
         # Publish to MQTT
         self.publish_callback(unit_id, 'inverter', data)
+        self._update_runtime_on_success(device_info, 'inverter')
         self.log.debug(f"Inverter {unit_id}: published (W={data.get('ac_power', 0)})")
         return True
 
@@ -608,6 +809,10 @@ class DevicePoller(threading.Thread):
         """Poll a single meter with retry on failure."""
         unit_id = device_info['device_id']
 
+        # Check if device is in backoff period (offline with exponential delay)
+        if self._is_device_in_backoff(device_info, 'meter'):
+            return False
+
         regs = None
         for attempt in range(max_retries):
             regs = self.connection.read_registers(40072, 53, unit_id)
@@ -620,6 +825,7 @@ class DevicePoller(threading.Thread):
                 time.sleep(0.5)
             else:
                 self.log.warning(f"Meter {unit_id}: read failed after {max_retries} attempts")
+                self._update_runtime_on_failure(device_info, 'meter')
                 return False
 
         data = self.parser.parse_meter_measurements(regs)
@@ -628,6 +834,7 @@ class DevicePoller(threading.Thread):
         data['model'] = device_info.get('model', '')
 
         self.publish_callback(unit_id, 'meter', data)
+        self._update_runtime_on_success(device_info, 'meter')
         self.log.debug(f"Meter {unit_id}: published (W={data.get('power_total', 0)})")
         return True
 

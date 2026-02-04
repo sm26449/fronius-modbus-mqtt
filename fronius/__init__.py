@@ -5,7 +5,7 @@ Reads data from Fronius inverters and smart meters via Modbus TCP
 and publishes to MQTT and/or InfluxDB.
 """
 
-__version__ = "1.2.6"
+__version__ = "1.3.0"
 
 from .config import ConfigLoader, get_config
 from .logging_setup import setup_logging, get_logger

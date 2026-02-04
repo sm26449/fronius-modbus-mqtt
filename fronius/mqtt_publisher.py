@@ -144,6 +144,16 @@ HA_MPPT_STRING_SENSORS = [
     ("Tmp", "Temperature", "°C", "temperature", "measurement"),
 ]
 
+# Runtime monitoring sensors (diagnostic category)
+# Format: (topic_suffix, ha_name, unit, device_class, state_class, icon)
+HA_RUNTIME_SENSORS = [
+    ("runtime/status", "Runtime Status", None, None, None, "mdi:heart-pulse"),
+    ("runtime/last_seen", "Last Seen", None, "timestamp", None, "mdi:clock-outline"),
+    ("runtime/read_errors", "Read Errors", None, None, "total_increasing", "mdi:alert-circle"),
+    ("runtime/uptime", "Uptime", None, None, None, "mdi:timer-outline"),
+    ("runtime/model_id", "Model ID", None, None, None, "mdi:identifier"),
+]
+
 # Default number of MPPT strings for Fronius inverters
 DEFAULT_MPPT_STRINGS = 2
 
@@ -1083,6 +1093,88 @@ class MQTTPublisher:
                 count += 1
 
         self.log.info(f"Published {count} HA discovery configs for storage {device_id}")
+        return count
+
+    def publish_aggregate_status(self, device_type: str, status: str):
+        """
+        Publish aggregate status for a device type.
+
+        Args:
+            device_type: 'inverter' or 'meter'
+            status: 'online', 'partial', or 'offline'
+        """
+        topic = f"{self.config.topic_prefix}/{device_type}/status"
+        self.publish(topic, status, retain=True)
+
+    def publish_device_runtime(self, device_type: str, device_id: str,
+                               runtime_data: Dict, uptime: str):
+        """
+        Publish runtime statistics for a single device.
+
+        Args:
+            device_type: 'inverter' or 'meter'
+            device_id: Device identifier
+            runtime_data: Dict with status, last_seen, read_errors, model_id
+            uptime: Container uptime string like "4d 12h 35m"
+        """
+        if not self.connected:
+            return
+
+        base = f"{self.config.topic_prefix}/{device_type}/{device_id}/runtime"
+
+        # Publish runtime fields
+        if 'status' in runtime_data:
+            self.publish_if_changed(f"{base}/status", runtime_data['status'])
+        if 'last_seen' in runtime_data and runtime_data['last_seen']:
+            self.publish_if_changed(f"{base}/last_seen", runtime_data['last_seen'])
+        if 'read_errors' in runtime_data:
+            self.publish_if_changed(f"{base}/read_errors", runtime_data['read_errors'])
+        if 'model_id' in runtime_data and runtime_data['model_id'] is not None:
+            self.publish_if_changed(f"{base}/model_id", runtime_data['model_id'])
+
+        # Uptime is container-wide, same for all devices
+        self.publish_if_changed(f"{base}/uptime", uptime)
+
+    def publish_ha_discovery_runtime(self, device_type: str, device_id: str,
+                                      model: str = None, manufacturer: str = "Fronius",
+                                      serial_number: str = None) -> int:
+        """
+        Publish Home Assistant discovery configs for runtime sensors.
+
+        Args:
+            device_type: 'inverter' or 'meter'
+            device_id: Device identifier
+            model: Device model name
+            manufacturer: Manufacturer name
+            serial_number: Device serial number
+
+        Returns:
+            Number of discovery configs published
+        """
+        if not self.connected:
+            return 0
+
+        device_info = self._build_ha_device_info(device_type, device_id, model, manufacturer, serial_number)
+        count = 0
+
+        for sensor in HA_RUNTIME_SENSORS:
+            sunspec_name, ha_name, unit, device_class, state_class, icon = sensor
+
+            config = self._build_ha_sensor_config(
+                device_type, device_id, sunspec_name, ha_name,
+                unit, device_class, state_class, icon, device_info
+            )
+
+            # Mark as diagnostic entity
+            config["entity_category"] = "diagnostic"
+
+            # Build discovery topic
+            safe_name = sunspec_name.lower().replace("/", "_")
+            discovery_topic = f"{HA_DISCOVERY_PREFIX}/sensor/fronius/{device_type}_{device_id}/{safe_name}/config"
+
+            if self._publish(discovery_topic, json.dumps(config), retain=True):
+                count += 1
+
         return count
 
     def get_stats(self) -> Dict:

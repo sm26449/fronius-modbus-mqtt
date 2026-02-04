@@ -50,6 +50,7 @@ class FroniusModbusMQTT:
         """
         self.running = False
         self.device_filter = device_filter
+        self._start_time = time.time()
         self.config = get_config(config_path)
 
         # Determine log file path - use device-specific log if filter is set
@@ -221,6 +222,12 @@ class FroniusModbusMQTT:
             )
             total_configs += count
 
+            # Publish runtime discovery for inverter
+            count = self.mqtt_publisher.publish_ha_discovery_runtime(
+                'inverter', device_id, model, manufacturer, serial_number
+            )
+            total_configs += count
+
             # Publish storage discovery if inverter has storage
             if inverter.get('has_storage'):
                 count = self.mqtt_publisher.publish_ha_discovery_storage(
@@ -238,6 +245,12 @@ class FroniusModbusMQTT:
 
             count = self.mqtt_publisher.publish_ha_discovery_meter(
                 device_id, model, manufacturer, serial_number
+            )
+            total_configs += count
+
+            # Publish runtime discovery for meter
+            count = self.mqtt_publisher.publish_ha_discovery_runtime(
+                'meter', device_id, model, manufacturer, serial_number
             )
             total_configs += count
 
@@ -280,6 +293,48 @@ class FroniusModbusMQTT:
         self.running = True
         self._main_loop()
 
+    def _format_uptime(self) -> str:
+        """Format container uptime as 'Xd Xh Xm'."""
+        elapsed = int(time.time() - self._start_time)
+        days = elapsed // 86400
+        hours = (elapsed % 86400) // 3600
+        minutes = (elapsed % 3600) // 60
+
+        parts = []
+        if days > 0:
+            parts.append(f"{days}d")
+        if hours > 0 or days > 0:
+            parts.append(f"{hours}h")
+        parts.append(f"{minutes}m")
+
+        return " ".join(parts)
+
+    def _publish_runtime_stats(self):
+        """Publish runtime statistics for all devices."""
+        if not self.mqtt_publisher or not self.mqtt_publisher.connected:
+            return
+
+        if not self.modbus_client or not self.modbus_client.device_poller:
+            return
+
+        # Get runtime stats from poller
+        stats = self.modbus_client.device_poller.get_runtime_stats()
+        uptime = self._format_uptime()
+
+        # Publish aggregate status
+        self.mqtt_publisher.publish_aggregate_status('inverter', stats['inverter_status'])
+        self.mqtt_publisher.publish_aggregate_status('meter', stats['meter_status'])
+
+        # Publish per-device runtime
+        for key, device_data in stats['devices'].items():
+            # Parse key to get device_type and device_id
+            parts = key.split('_', 1)
+            if len(parts) == 2:
+                device_type, device_id = parts
+                self.mqtt_publisher.publish_device_runtime(
+                    device_type, device_id, device_data, uptime
+                )
+
     def _main_loop(self):
         """Main loop - just keeps the app running while threads poll"""
         self.log.info(f"Polling threads started (mode: {self.config.general.publish_mode})")
@@ -292,10 +347,11 @@ class FroniusModbusMQTT:
             try:
                 time.sleep(1)
 
-                # Write health file periodically
+                # Write health file and publish runtime stats periodically
                 now = time.time()
                 if now - last_health_write >= health_interval:
                     self._write_health_file()
+                    self._publish_runtime_stats()
                     last_health_write = now
 
             except KeyboardInterrupt:
@@ -334,6 +390,7 @@ class FroniusModbusMQTT:
                 f.write(f"modbus:{modbus_connected}\n")
                 f.write(f"sleep_mode:{in_sleep_mode}\n")
                 f.write(f"night_time:{is_night}\n")
+                f.write(f"uptime:{self._format_uptime()}\n")
         except Exception as e:
             self.log.warning(f"Failed to write health file: {e}")
 

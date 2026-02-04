@@ -1,6 +1,6 @@
 # Fronius Modbus MQTT
 
-[![Version](https://img.shields.io/badge/version-1.2.7-blue.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-1.3.0-blue.svg)](CHANGELOG.md)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
 Python application that reads data from Fronius inverters and smart meters via Modbus TCP and publishes to MQTT and/or InfluxDB.
@@ -10,6 +10,7 @@ Python application that reads data from Fronius inverters and smart meters via M
 - **SunSpec Protocol Support** - Full SunSpec Modbus implementation with automatic scale factor handling
 - **Multi-Device Support** - Poll multiple inverters and smart meters simultaneously
 - **Home Assistant Integration** - MQTT autodiscovery for automatic entity creation
+- **Runtime Monitoring** - Per-device online/offline status, read error counters, uptime tracking
 - **MPPT Data** - Per-string voltage, current, and power (Model 160)
 - **Immediate Controls** - Read inverter control settings (Model 123)
 - **Event Parsing** - Decode Fronius event flags with human-readable descriptions
@@ -256,9 +257,27 @@ docker-compose ps
 
 Topics use the Modbus unit ID (not serial number) for device identification.
 
-### Status Topic
+### Status Topics
 ```
 fronius/status                    # "online" or "offline" (LWT)
+fronius/inverter/status           # Aggregate: "online", "partial", or "offline"
+fronius/meter/status              # Aggregate: "online", "partial", or "offline"
+```
+
+### Runtime Monitoring Topics
+Per-device runtime statistics (diagnostic entities in Home Assistant):
+```
+fronius/inverter/{id}/runtime/status       # "online" or "offline"
+fronius/inverter/{id}/runtime/last_seen    # ISO timestamp (e.g., "2026-02-04T10:45:23")
+fronius/inverter/{id}/runtime/read_errors  # Cumulative error count
+fronius/inverter/{id}/runtime/uptime       # Container uptime (e.g., "4d 12h 35m")
+fronius/inverter/{id}/runtime/model_id     # SunSpec model ID (e.g., 103)
+
+fronius/meter/{id}/runtime/status          # Same structure for meters
+fronius/meter/{id}/runtime/last_seen
+fronius/meter/{id}/runtime/read_errors
+fronius/meter/{id}/runtime/uptime
+fronius/meter/{id}/runtime/model_id
 ```
 
 ### Inverter Topics
