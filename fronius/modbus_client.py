@@ -209,12 +209,28 @@ class ModbusConnection:
             'serial_number': self.parser.decode_string(regs[52:68]),
         }
 
-        time.sleep(0.1)
+        # Force TCP reconnection to clear DataManager buffer before reading model ID
+        # Without this, the buffer may contain residual SunSpec header data (e.g., 0x5365 = "Se")
+        self.connected = False
+        time.sleep(0.3)
 
-        # Read model ID
-        model_regs = self.read_registers(40070, 1, unit_id)
-        if model_regs:
-            model_id = model_regs[0]
+        # Read model ID with retry on invalid value
+        valid_models = self.INVERTER_MODELS + self.METER_MODELS
+        model_id = None
+
+        for attempt in range(3):
+            model_regs = self.read_registers(40070, 1, unit_id)
+            if model_regs:
+                model_id = model_regs[0]
+                if model_id in valid_models:
+                    break
+                # Invalid model_id (e.g., 21365 = 0x5365 = "Se" from SunSpec header)
+                self.log.debug(f"Device {unit_id}: invalid model_id {model_id} (0x{model_id:04X}), retry {attempt + 1}/3")
+                self.connected = False
+                time.sleep(0.3)
+                model_id = None
+
+        if model_id:
             device_info['model_id'] = model_id
             if model_id in self.INVERTER_MODELS:
                 device_info['device_type'] = 'inverter'
@@ -222,7 +238,7 @@ class ModbusConnection:
             elif model_id in self.METER_MODELS:
                 device_info['device_type'] = 'meter'
 
-        self.log.info(f"Device {unit_id}: {device_info['manufacturer']} {device_info['model']} (SN: {device_info['serial_number']})")
+        self.log.info(f"Device {unit_id}: {device_info['manufacturer']} {device_info['model']} model_id={model_id} (SN: {device_info['serial_number']})")
         return device_info
 
     def check_storage_support(self, unit_id: int) -> bool:
@@ -302,10 +318,15 @@ class DevicePoller(threading.Thread):
         """Initialize or get runtime state for a device. Must be called with _runtime_lock held."""
         key = self._runtime_key(device_info['device_id'], device_type)
         if key not in self._device_runtime:
+            model_id = device_info.get('model_id')
+            self.log.debug(
+                f"{device_type.title()} {device_info['device_id']}: "
+                f"initializing runtime state with model_id={model_id}"
+            )
             self._device_runtime[key] = DeviceRuntimeState(
                 device_id=device_info['device_id'],
                 device_type=device_type,
-                model_id=device_info.get('model_id')
+                model_id=model_id
             )
         return self._device_runtime[key]
 
@@ -384,10 +405,27 @@ class DevicePoller(threading.Thread):
                          state: DeviceRuntimeState, reason: str = ""):
         """Re-read and verify model_id from device."""
         unit_id = device_info['device_id']
+
+        # Force connection reset to clear DataManager buffer before reading model_id
+        self.connection.connected = False
+        time.sleep(0.3)
+
         model_regs = self.connection.read_registers(40070, 1, unit_id)
 
         if model_regs:
             new_model_id = model_regs[0]
+
+            # Validate model_id is in expected range (SunSpec inverter/meter models)
+            # Invalid values like 21365 (0x5365) are residual buffer data
+            valid_models = [101, 102, 103, 111, 112, 113, 201, 202, 203, 204]
+            if new_model_id not in valid_models:
+                self.log.debug(
+                    f"{device_type.title()} {unit_id}: ignoring invalid model_id {new_model_id} "
+                    f"(buffer residue), keeping {state.model_id}"
+                )
+                with self._runtime_lock:
+                    state.model_id_verified_at = datetime.now()
+                return
 
             with self._runtime_lock:
                 old_model_id = state.model_id

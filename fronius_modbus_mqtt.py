@@ -321,9 +321,11 @@ class FroniusModbusMQTT:
         stats = self.modbus_client.device_poller.get_runtime_stats()
         uptime = self._format_uptime()
 
-        # Publish aggregate status
-        self.mqtt_publisher.publish_aggregate_status('inverter', stats['inverter_status'])
-        self.mqtt_publisher.publish_aggregate_status('meter', stats['meter_status'])
+        # Publish aggregate status only for device types we're monitoring
+        if stats['inverter_total'] > 0:
+            self.mqtt_publisher.publish_aggregate_status('inverter', stats['inverter_status'])
+        if stats['meter_total'] > 0:
+            self.mqtt_publisher.publish_aggregate_status('meter', stats['meter_status'])
 
         # Publish per-device runtime
         for key, device_data in stats['devices'].items():
