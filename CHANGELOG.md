@@ -40,6 +40,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Aggregate Status Publishing**
   - Fixed fronius-meter container incorrectly publishing "offline" for inverter aggregate status
   - Aggregate status now only published for device types with at least one device
+- **Home Assistant Runtime Sensors**
+  - Removed `state_class: total_increasing` from read_errors (counter resets on restart)
+  - Added `retain=True` for all runtime MQTT topics (HA gets last state on reconnect)
 
 ## [1.2.7] - 2026-01-11
 
