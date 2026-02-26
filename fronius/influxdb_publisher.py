@@ -365,6 +365,8 @@ class InfluxDBPublisher:
                             point = point.field(f"string{i}_power", float(module['dc_power']))
                         if module.get('dc_energy') is not None:
                             point = point.field(f"string{i}_energy", float(module['dc_energy']))
+                        if module.get('temperature') is not None:
+                            point = point.field(f"string{i}_temperature", float(module['temperature']))
 
             with self.lock:
                 self.write_api.write(bucket=self.config.bucket, record=point)
@@ -484,6 +486,52 @@ class InfluxDBPublisher:
         except Exception as e:
             self.writes_failed += 1
             self.log.error(f"InfluxDB write error for meter {device_id}: {e}")
+            self._handle_write_error(e)
+
+    def write_storage_data(self, device_id: str, data: Dict):
+        """
+        Write storage (battery) data to InfluxDB.
+
+        Args:
+            device_id: Device identifier (inverter unit ID)
+            data: Parsed storage data from Model 124
+        """
+        if not self.is_enabled():
+            return
+
+        key = f"storage_{device_id}"
+        if not self._should_write(key, data):
+            return
+
+        try:
+            from influxdb_client import Point
+
+            point = Point("fronius_storage") \
+                .tag("device_id", device_id) \
+                .tag("device_type", "inverter")
+
+            if data.get('serial_number'):
+                point = point.tag("serial_number", data['serial_number'])
+
+            # Numeric fields
+            numeric_fields = [
+                'charge_state_pct', 'battery_voltage', 'max_charge_power',
+                'charge_status_code', 'discharge_rate_pct', 'charge_rate_pct',
+                'min_reserve_pct', 'available_storage_ah',
+                'charge_ramp_rate', 'discharge_ramp_rate', 'grid_charging_code',
+            ]
+
+            for field in numeric_fields:
+                if field in data and data[field] is not None:
+                    point = point.field(field, float(data[field]))
+
+            with self.lock:
+                self.write_api.write(bucket=self.config.bucket, record=point)
+            self.writes_total += 1
+
+        except Exception as e:
+            self.writes_failed += 1
+            self.log.error(f"InfluxDB write error for storage {device_id}: {e}")
             self._handle_write_error(e)
 
     def flush(self):

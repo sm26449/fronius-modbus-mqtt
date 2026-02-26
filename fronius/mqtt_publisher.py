@@ -118,6 +118,15 @@ HA_STORAGE_SENSORS = [
     ("InBatV", "Battery Voltage", "V", "voltage", "measurement", None),
     ("WChaMax", "Max Charge Power", "W", "power", "measurement", None),
     ("status", "Charge Status", None, None, None, "mdi:battery-charging"),
+    ("OutWRte", "Discharge Rate", "%", None, "measurement", "mdi:battery-minus"),
+    ("InWRte", "Charge Rate", "%", None, "measurement", "mdi:battery-plus"),
+    ("MinRsvPct", "Min Reserve", "%", None, "measurement", "mdi:battery-lock"),
+    ("StorAval", "Available Storage", "Ah", None, "measurement", "mdi:battery-check"),
+    ("WDisChaGra", "Discharge Ramp Rate", "%/s", None, "measurement", "mdi:slope-downhill"),
+    ("WChaGra", "Charge Ramp Rate", "%/s", None, "measurement", "mdi:slope-uphill"),
+    ("VAChaMax", "Max Charge VA", "VA", "apparent_power", "measurement", None),
+    ("StorCtl_Mod", "Storage Control Mode", None, None, None, "mdi:cog"),
+    ("ChaGriSet", "Grid Charging", None, None, None, "mdi:transmission-tower"),
 ]
 
 # Inverter controls sensor definitions for HA discovery

@@ -119,7 +119,8 @@ class FroniusModbusMQTT:
         elif device_type == 'storage':
             if self.mqtt_publisher:
                 self.mqtt_publisher.publish_storage_data(str(device_id), data)
-            # InfluxDB storage support can be added later if needed
+            if self.influxdb_publisher:
+                self.influxdb_publisher.write_storage_data(str(device_id), data)
 
     def _init_modbus(self) -> bool:
         """Initialize Modbus client and connect with retry logic"""
