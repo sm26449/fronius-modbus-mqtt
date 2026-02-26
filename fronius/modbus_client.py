@@ -1,9 +1,8 @@
 """Modbus TCP Client with simple sequential polling for Fronius devices
 
 Architecture:
-- MeterPoller: Thread that reads meter, publishes to MQTT, sleeps, repeats
-- InverterPoller: Thread that cycles through inverters one by one with pauses
-- Single shared Modbus connection
+- DevicePoller: Single thread that polls all inverters and meters sequentially
+- Dedicated Modbus connection per poller
 - Night/Sleep mode detection for Fronius DataManager
 """
 
@@ -570,10 +569,10 @@ class DevicePoller(threading.Thread):
         if mppt_data and mppt_data.get('modules'):
             data['mppt'] = mppt_data
             for i, mod in enumerate(mppt_data['modules']):
-                self.log.info(f"Inverter {unit_id} MPPT{i+1}: "
-                              f"V={mod.get('dc_voltage', 0):.1f}V, "
-                              f"I={mod.get('dc_current', 0):.2f}A, "
-                              f"P={mod.get('dc_power', 0):.0f}W")
+                self.log.debug(f"Inverter {unit_id} MPPT{i+1}: "
+                               f"V={mod.get('dc_voltage', 0):.1f}V, "
+                               f"I={mod.get('dc_current', 0):.2f}A, "
+                               f"P={mod.get('dc_power', 0):.0f}W")
 
         # Read Model 123 - Immediate Controls (power limit, PF, connection status)
         # Only read every CONTROLS_POLL_INTERVAL seconds (controls don't change often)
@@ -1012,24 +1011,6 @@ class DevicePoller(threading.Thread):
         self._stop_event.set()  # Interrupt sleep immediately
 
 
-# Keep old class names for backward compatibility
-class InverterPoller(DevicePoller):
-    """Backward compatibility wrapper."""
-    def __init__(self, modbus_config: ModbusConfig, inverters: List[Dict],
-                 poll_delay: float, read_delay_ms: int, parser: RegisterParser,
-                 publish_callback: Callable):
-        super().__init__(modbus_config, inverters, [], poll_delay, read_delay_ms,
-                        parser, publish_callback)
-
-
-class MeterPoller(DevicePoller):
-    """Backward compatibility wrapper."""
-    def __init__(self, modbus_config: ModbusConfig, meters: List[Dict],
-                 poll_interval: float, parser: RegisterParser, publish_callback: Callable):
-        super().__init__(modbus_config, [], meters, poll_interval, 500,
-                        parser, publish_callback)
-
-
 class FroniusModbusClient:
     """Main Modbus client managing connection and pollers."""
 
@@ -1121,10 +1102,6 @@ class FroniusModbusClient:
             )
             self.device_poller.start()
             self.log.info("Started single DevicePoller thread for all devices")
-
-    def poll_all_devices(self) -> Dict:
-        """For compatibility - data is published via callback."""
-        return {'inverters': {}, 'meters': {}, 'timestamp': time.time()}
 
     def get_stats(self) -> Dict:
         # Aggregate stats from all connections

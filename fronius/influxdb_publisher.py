@@ -250,15 +250,15 @@ class InfluxDBPublisher:
         """
         current_time = time.time()
 
-        # Rate limiting
-        if key in self.last_write_time:
-            elapsed = current_time - self.last_write_time[key]
-            if elapsed < self.config.write_interval:
-                return False
+        with self.lock:
+            # Rate limiting
+            if key in self.last_write_time:
+                elapsed = current_time - self.last_write_time[key]
+                if elapsed < self.config.write_interval:
+                    return False
 
-        # Change detection
-        if self.publish_mode == 'changed':
-            with self.lock:
+            # Change detection
+            if self.publish_mode == 'changed':
                 if key in self.last_values:
                     # Compare numeric fields
                     changed = False
@@ -278,8 +278,8 @@ class InfluxDBPublisher:
                     if isinstance(v, (int, float))
                 }
 
-        self.last_write_time[key] = current_time
-        return True
+            self.last_write_time[key] = current_time
+            return True
 
     def write_inverter_data(self, device_id: str, data: Dict):
         """
@@ -372,7 +372,10 @@ class InfluxDBPublisher:
 
             # Write controls data as separate measurement (Model 123, read every 60s)
             if 'controls' in data and data['controls']:
-                self._write_controls_data(device_id, data)
+                try:
+                    self._write_controls_data(device_id, data)
+                except Exception as e:
+                    self.log.warning(f"InfluxDB controls write error for {device_id}: {e}")
 
         except Exception as e:
             self.writes_failed += 1

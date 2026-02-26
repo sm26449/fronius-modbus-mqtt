@@ -540,7 +540,7 @@ class MQTTPublisher:
                 self.last_values[topic] = value
                 return True
 
-        return False
+            return False
 
     def _publish(self, topic: str, payload: str, retain: bool = None) -> bool:
         """
