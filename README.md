@@ -1,6 +1,6 @@
 # Fronius Modbus MQTT
 
-[![Version](https://img.shields.io/badge/version-1.3.0-blue.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-1.3.1-blue.svg)](CHANGELOG.md)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
 Python application that reads data from Fronius inverters and smart meters via Modbus TCP and publishes to MQTT and/or InfluxDB.
@@ -339,6 +339,13 @@ fronius/meter/240/W               # Meter power
 | ac_frequency | float | Grid frequency (Hz) |
 | lifetime_energy | float | Total energy produced (Wh) |
 | status_code | int | Operating status code |
+| status_alarm | bool | Alarm flag |
+| event_count | int | Number of active events |
+| events_json | string | JSON array with decoded event codes, descriptions and class |
+| string{n}_current | float | MPPT string N current (A) |
+| string{n}_voltage | float | MPPT string N voltage (V) |
+| string{n}_power | float | MPPT string N power (W) |
+| string{n}_energy | float | MPPT string N lifetime energy (Wh) |
 
 ### fronius_meter
 | Field | Type | Description |

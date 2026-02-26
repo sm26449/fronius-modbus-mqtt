@@ -5,6 +5,21 @@ All notable changes to Fronius Modbus MQTT will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.1] - 2026-02-26
+
+### Added
+- **InfluxDB Event Detail Persistence**
+  - New `events_json` field in `fronius_inverter` measurement
+  - Stores decoded fault event codes, descriptions, and event class as compact JSON
+  - Enables Grafana alerting and historical analysis of inverter fault events
+  - Only written when events are active (no empty JSON stored)
+
+### Fixed
+- Moved `json` import to module level in `influxdb_publisher.py` (was incorrectly inside conditional block)
+
+### Changed
+- Updated InfluxDB measurement documentation in README with complete field list
+
 ## [1.3.0] - 2026-02-04
 
 ### Added
@@ -297,6 +312,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 | Version | Date | Highlights |
 |---------|------|------------|
+| 1.3.1 | 2026-02-26 | InfluxDB events_json field for fault event persistence |
 | 1.3.0 | 2026-02-04 | Runtime monitoring with per-device status, error tracking, uptime |
 | 1.2.7 | 2026-01-11 | InfluxDB bucket creation in container entrypoint |
 | 1.2.6 | 2026-01-11 | Config auto-initialization, writable config volume |
