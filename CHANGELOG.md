@@ -5,6 +5,49 @@ All notable changes to Fronius Modbus MQTT will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.0] - 2026-02-26
+
+### Added
+- **Persistent Connection Monitoring**
+  - MQTT and InfluxDB reconnection threads now run permanently (no longer exit after first reconnect)
+  - InfluxDB proactive health check every 30s detects disconnections within seconds (previously up to 5 min)
+  - MQTT monitor thread tracks state transitions and logs connect/disconnect events
+  - Disconnection counter (`disconnection_count`) in both publishers for operational visibility
+- **InfluxDB Data Loss Callbacks**
+  - `error_callback` logs ERROR when batch write fails permanently (all retries exhausted)
+  - `retry_callback` logs WARNING on each retry attempt
+  - More aggressive retry config: 10 retries, 5 min max retry time, exponential backoff
+- **MQTT Message Queuing**
+  - `max_queued_messages_set(1000)` for QoS >= 1 message buffering during disconnections
+  - Publish methods no longer silently drop messages when disconnected (attempt delivery via paho)
+  - `MQTT_ERR_QUEUE_SIZE` handling with warning log when outgoing queue is full
+- **Extended Health Monitoring**
+  - InfluxDB connection status (`influxdb:True/False`) in health file
+  - MQTT and InfluxDB disconnection counters in health file
+  - Healthcheck refactored to prefix-based key:value parsing (robust to field additions)
+- **Log Rotation**
+  - `RotatingFileHandler` replaces `FileHandler`: 5 MB per file, 3 backups (20 MB max)
+
+### Changed
+- **Thread Safety**
+  - `self.connected` (bool) replaced with `threading.Event()` + property in both publishers
+  - InfluxDB `_setup_client()` and `write_api.write()` protected by `self.lock`
+  - Prevents race conditions during reconnection while polling threads write data
+- **MQTT Reconnection Architecture**
+  - Paho's built-in auto-reconnect (`reconnect_delay_set`) handles network recovery
+  - Custom reconnect thread is now a state monitor (does not call `connect()` on running paho loop)
+  - `_try_connect()` only called for initial connection failures (tracked via `_loop_started` flag)
+  - Eliminates race condition between paho's network thread and external `connect()` calls
+- **Interruptible Shutdown**
+  - `time.sleep()` replaced with `_stop_event.wait()` in device polling loop
+  - Shutdown responds immediately instead of waiting for poll delay (up to 10s with 4 inverters)
+
+### Fixed
+- Reconnection threads died permanently after first successful reconnect (broke on second disconnection)
+- MQTT `_publish()` silently dropped all messages when disconnected (now attempts delivery)
+- InfluxDB `_setup_client()` could race with `write_api.write()` from polling threads
+- Health file parsing in healthcheck.py was index-based (broke when new fields were added)
+
 ## [1.3.1] - 2026-02-26
 
 ### Added
@@ -312,6 +355,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 | Version | Date | Highlights |
 |---------|------|------------|
+| 1.4.0 | 2026-02-26 | Resilient reconnection, data loss prevention, graceful shutdown |
 | 1.3.1 | 2026-02-26 | InfluxDB events_json field for fault event persistence |
 | 1.3.0 | 2026-02-04 | Runtime monitoring with per-device status, error tracking, uptime |
 | 1.2.7 | 2026-01-11 | InfluxDB bucket creation in container entrypoint |

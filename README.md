@@ -1,6 +1,6 @@
 # Fronius Modbus MQTT
 
-[![Version](https://img.shields.io/badge/version-1.3.1-blue.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-1.4.0-blue.svg)](CHANGELOG.md)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
 Python application that reads data from Fronius inverters and smart meters via Modbus TCP and publishes to MQTT and/or InfluxDB.
@@ -15,7 +15,7 @@ Python application that reads data from Fronius inverters and smart meters via M
 - **Immediate Controls** - Read inverter control settings (Model 123)
 - **Event Parsing** - Decode Fronius event flags with human-readable descriptions
 - **Night Mode** - Automatic sleep detection when inverters go offline at night
-- **Connection Resilience** - Automatic retry with exponential backoff for Modbus, MQTT, and InfluxDB
+- **Connection Resilience** - Persistent reconnection monitoring, proactive health checks, data loss prevention
 - **Publish Modes** - Publish on change or publish all values
 - **Docker Support** - Separate containers for inverters and meters
 - **MQTT Integration** - Publish to any MQTT broker with configurable topics and LWT

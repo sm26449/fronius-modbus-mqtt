@@ -1,7 +1,7 @@
 FROM python:3.11-slim
 
 LABEL maintainer="Stefan M <sm26449@diysolar.ro>"
-LABEL version="1.3.1"
+LABEL version="1.4.0"
 LABEL description="Fronius Modbus TCP to MQTT/InfluxDB Bridge"
 
 WORKDIR /app
