@@ -27,6 +27,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Healthcheck refactored to prefix-based key:value parsing (robust to field additions)
 - **Log Rotation**
   - `RotatingFileHandler` replaces `FileHandler`: 5 MB per file, 3 backups (20 MB max)
+- **Security Hardening**
+  - Container runs as non-root user `fronius` (entrypoint uses `gosu` for privilege drop)
+  - Optional TLS/SSL support for MQTT (`MQTT_TLS_*` env vars) and InfluxDB (`INFLUXDB_VERIFY_SSL`, `INFLUXDB_SSL_CA_CERT`)
+  - InfluxDB token no longer exposed in process list (uses `curl -K` config file)
+  - `MQTTConfig` and `InfluxDBConfig` mask secrets (password/token) in `__repr__` output
+  - Example YAML config updated with TLS options
 
 ### Changed
 - **Thread Safety**

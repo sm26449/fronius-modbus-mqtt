@@ -9,8 +9,10 @@ Environment variable mapping:
   INVERTER_IDS (comma-separated), METER_IDS (comma-separated)
   MQTT_ENABLED, MQTT_BROKER, MQTT_PORT, MQTT_USERNAME, MQTT_PASSWORD
   MQTT_PREFIX, MQTT_RETAIN, MQTT_QOS, HA_DISCOVERY_ENABLED
+  MQTT_TLS_ENABLED, MQTT_TLS_CA_CERTS, MQTT_TLS_CERTFILE, MQTT_TLS_KEYFILE, MQTT_TLS_INSECURE
   INFLUXDB_ENABLED, INFLUXDB_URL, INFLUXDB_TOKEN, INFLUXDB_ORG
   INFLUXDB_BUCKET, INFLUXDB_WRITE_INTERVAL, INFLUXDB_PUBLISH_MODE
+  INFLUXDB_VERIFY_SSL, INFLUXDB_SSL_CA_CERT
   POLL_INTERVAL, PUBLISH_MODE, LOG_LEVEL
 """
 
@@ -95,6 +97,20 @@ class MQTTConfig:
     retain: bool = True
     qos: int = 0
     ha_discovery_enabled: bool = False  # Home Assistant MQTT autodiscovery
+    # TLS settings (optional)
+    tls_enabled: bool = False
+    tls_ca_certs: str = ""      # Path to CA certificate file
+    tls_certfile: str = ""      # Path to client certificate file
+    tls_keyfile: str = ""       # Path to client private key file
+    tls_insecure: bool = False  # Skip hostname verification (for IP-based connections)
+
+    def __repr__(self) -> str:
+        masked_pw = "***" if self.password else ""
+        return (
+            f"MQTTConfig(broker={self.broker!r}, port={self.port}, "
+            f"username={self.username!r}, password={masked_pw!r}, "
+            f"tls_enabled={self.tls_enabled})"
+        )
 
 
 @dataclass
@@ -107,6 +123,17 @@ class InfluxDBConfig:
     bucket: str = "fronius"
     write_interval: int = 5
     publish_mode: str = ""  # Empty = use general.publish_mode
+    # TLS settings (optional)
+    verify_ssl: bool = True    # Verify SSL certificates
+    ssl_ca_cert: str = ""      # Path to CA certificate file
+
+    def __repr__(self) -> str:
+        masked_token = "***" if self.token else ""
+        return (
+            f"InfluxDBConfig(url={self.url!r}, org={self.org!r}, "
+            f"bucket={self.bucket!r}, token={masked_token!r}, "
+            f"verify_ssl={self.verify_ssl})"
+        )
 
 
 @dataclass
@@ -246,7 +273,12 @@ class ConfigLoader:
             topic_prefix=_env_get('MQTT_PREFIX', mq.get('topic_prefix', 'fronius')),
             retain=_env_get('MQTT_RETAIN', mq.get('retain', True), bool),
             qos=_env_get('MQTT_QOS', mq.get('qos', 0), int),
-            ha_discovery_enabled=_env_get('HA_DISCOVERY_ENABLED', mq.get('ha_discovery_enabled', False), bool)
+            ha_discovery_enabled=_env_get('HA_DISCOVERY_ENABLED', mq.get('ha_discovery_enabled', False), bool),
+            tls_enabled=_env_get('MQTT_TLS_ENABLED', mq.get('tls_enabled', False), bool),
+            tls_ca_certs=_env_get('MQTT_TLS_CA_CERTS', mq.get('tls_ca_certs', '')),
+            tls_certfile=_env_get('MQTT_TLS_CERTFILE', mq.get('tls_certfile', '')),
+            tls_keyfile=_env_get('MQTT_TLS_KEYFILE', mq.get('tls_keyfile', '')),
+            tls_insecure=_env_get('MQTT_TLS_INSECURE', mq.get('tls_insecure', False), bool),
         )
 
         # Parse InfluxDB settings
@@ -258,7 +290,9 @@ class ConfigLoader:
             org=_env_get('INFLUXDB_ORG', idb.get('org', '')),
             bucket=_env_get('INFLUXDB_BUCKET', idb.get('bucket', 'fronius')),
             write_interval=_env_get('INFLUXDB_WRITE_INTERVAL', idb.get('write_interval', 5), int),
-            publish_mode=_env_get('INFLUXDB_PUBLISH_MODE', idb.get('publish_mode', ''))
+            publish_mode=_env_get('INFLUXDB_PUBLISH_MODE', idb.get('publish_mode', '')),
+            verify_ssl=_env_get('INFLUXDB_VERIFY_SSL', idb.get('verify_ssl', True), bool),
+            ssl_ca_cert=_env_get('INFLUXDB_SSL_CA_CERT', idb.get('ssl_ca_cert', '')),
         )
 
 

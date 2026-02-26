@@ -45,6 +45,12 @@ mqtt:
   topic_prefix: fronius        # Topics: fronius/inverter/{id}/...
   retain: true                 # Retain last value on broker
   qos: 0                       # QoS level (0, 1, or 2)
+  # TLS settings (optional - requires broker configured with TLS)
+  # tls_enabled: false
+  # tls_ca_certs: ""           # Path to CA certificate file
+  # tls_certfile: ""           # Path to client certificate file
+  # tls_keyfile: ""            # Path to client private key file
+  # tls_insecure: false        # Skip hostname verification (for IP-based connections)
 
 # InfluxDB Configuration (Optional)
 # ----------------------------------
@@ -56,3 +62,6 @@ influxdb:
   bucket: fronius              # Bucket name
   write_interval: 5            # Minimum seconds between writes per device
   publish_mode: changed        # 'changed' = only publish changes, 'all' = always publish
+  # TLS settings (optional - requires InfluxDB configured with TLS)
+  # verify_ssl: true           # Verify SSL certificates
+  # ssl_ca_cert: ""            # Path to CA certificate file

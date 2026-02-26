@@ -103,7 +103,9 @@ class InfluxDBPublisher:
                 self.client = InfluxDBClient(
                     url=self.config.url,
                     token=self.config.token,
-                    org=self.config.org
+                    org=self.config.org,
+                    verify_ssl=self.config.verify_ssl,
+                    ssl_ca_cert=self.config.ssl_ca_cert or None,
                 )
 
                 self.write_api = self.client.write_api(

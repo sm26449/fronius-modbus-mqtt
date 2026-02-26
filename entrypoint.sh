@@ -31,8 +31,14 @@ if [ "${INFLUXDB_ENABLED}" = "true" ] && [ -n "${INFLUXDB_URL}" ] && [ -n "${INF
     if [ $RETRY_COUNT -ge $MAX_RETRIES ]; then
         echo "Warning: InfluxDB not available after $MAX_RETRIES seconds, skipping bucket creation"
     else
+        # Use config file to avoid exposing token in process list
+        CURL_AUTH_CONFIG=$(mktemp)
+        chmod 600 "$CURL_AUTH_CONFIG"
+        echo "-H \"Authorization: Token ${INFLUXDB_TOKEN}\"" > "$CURL_AUTH_CONFIG"
+        trap 'rm -f "$CURL_AUTH_CONFIG"' EXIT
+
         # Check if bucket exists (look for "buckets":[ with content, not error message)
-        BUCKET_RESPONSE=$(curl -s -H "Authorization: Token ${INFLUXDB_TOKEN}" \
+        BUCKET_RESPONSE=$(curl -s -K "$CURL_AUTH_CONFIG" \
             "${INFLUXDB_URL}/api/v2/buckets?name=${INFLUXDB_BUCKET}&org=${INFLUXDB_ORG}")
 
         # Check if response contains "not found" error (handle multiline JSON)
@@ -47,14 +53,14 @@ if [ "${INFLUXDB_ENABLED}" = "true" ] && [ -n "${INFLUXDB_URL}" ] && [ -n "${INF
 
             # Get org ID from bucket list (we have bucket permissions, not org permissions)
             # Query all buckets and extract orgID from any existing bucket
-            ALL_BUCKETS=$(curl -s -H "Authorization: Token ${INFLUXDB_TOKEN}" \
+            ALL_BUCKETS=$(curl -s -K "$CURL_AUTH_CONFIG" \
                 "${INFLUXDB_URL}/api/v2/buckets" | tr -d '\t\n')
             ORG_ID=$(echo "$ALL_BUCKETS" | grep -o '"orgID": *"[^"]*"' | head -1 | sed 's/.*"\([^"]*\)"$/\1/')
 
             if [ -n "$ORG_ID" ]; then
                 # Create bucket
                 RESULT=$(curl -s -X POST "${INFLUXDB_URL}/api/v2/buckets" \
-                    -H "Authorization: Token ${INFLUXDB_TOKEN}" \
+                    -K "$CURL_AUTH_CONFIG" \
                     -H "Content-Type: application/json" \
                     -d "{\"name\":\"${INFLUXDB_BUCKET}\",\"orgID\":\"${ORG_ID}\",\"retentionRules\":[]}")
 
@@ -75,5 +81,11 @@ else
     echo "InfluxDB not enabled or not configured, skipping bucket setup"
 fi
 
-# Execute the main command
-exec "$@"
+# Cleanup auth config before exec replaces this shell (trap EXIT won't fire after exec)
+rm -f "$CURL_AUTH_CONFIG" 2>/dev/null
+
+# Fix ownership on mounted volumes (host volumes are owned by root)
+chown -R fronius:fronius /app/data /app/logs 2>/dev/null || true
+
+# Drop privileges and execute the main command as non-root user
+exec gosu fronius "$@"

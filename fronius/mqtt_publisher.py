@@ -331,6 +331,17 @@ class MQTTPublisher:
                 self.config.password
             )
 
+        # TLS configuration (optional)
+        if self.config.tls_enabled:
+            self.client.tls_set(
+                ca_certs=self.config.tls_ca_certs or None,
+                certfile=self.config.tls_certfile or None,
+                keyfile=self.config.tls_keyfile or None,
+            )
+            if self.config.tls_insecure:
+                self.client.tls_insecure_set(True)
+            self.log.info("MQTT TLS enabled")
+
         # Max outgoing queue size for QoS >= 1 messages.
         # QoS 0 messages are fire-and-forget (not queued when disconnected).
         self.client.max_queued_messages_set(1000)

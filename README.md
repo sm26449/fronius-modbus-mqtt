@@ -16,6 +16,7 @@ Python application that reads data from Fronius inverters and smart meters via M
 - **Event Parsing** - Decode Fronius event flags with human-readable descriptions
 - **Night Mode** - Automatic sleep detection when inverters go offline at night
 - **Connection Resilience** - Persistent reconnection monitoring, proactive health checks, data loss prevention
+- **Security Hardened** - Non-root container, optional TLS/SSL, secret masking in logs
 - **Publish Modes** - Publish on change or publish all values
 - **Docker Support** - Separate containers for inverters and meters
 - **MQTT Integration** - Publish to any MQTT broker with configurable topics and LWT
@@ -229,6 +230,11 @@ Configuration can also be set via environment variables (useful for Docker):
 | `MQTT_RETAIN` | Retain messages | `true` |
 | `MQTT_QOS` | QoS level (0, 1, 2) | `0` |
 | `HA_DISCOVERY_ENABLED` | Enable HA autodiscovery | `false` |
+| `MQTT_TLS_ENABLED` | Enable TLS/SSL for MQTT | `false` |
+| `MQTT_TLS_CA_CERTS` | Path to CA certificate file | `` |
+| `MQTT_TLS_CERTFILE` | Path to client certificate file | `` |
+| `MQTT_TLS_KEYFILE` | Path to client private key file | `` |
+| `MQTT_TLS_INSECURE` | Skip hostname verification | `false` |
 | **InfluxDB** | | |
 | `INFLUXDB_ENABLED` | Enable InfluxDB | `false` |
 | `INFLUXDB_URL` | InfluxDB URL | `` |
@@ -237,6 +243,8 @@ Configuration can also be set via environment variables (useful for Docker):
 | `INFLUXDB_BUCKET` | InfluxDB bucket | `fronius` |
 | `INFLUXDB_WRITE_INTERVAL` | Min seconds between writes per device | `5` |
 | `INFLUXDB_PUBLISH_MODE` | Override publish mode for InfluxDB | `` |
+| `INFLUXDB_VERIFY_SSL` | Verify SSL certificates | `true` |
+| `INFLUXDB_SSL_CA_CERT` | Path to CA certificate file | `` |
 
 ## Command Line Options
 
