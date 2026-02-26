@@ -1,6 +1,7 @@
 """Logging configuration for Fronius Modbus MQTT"""
 
 import logging
+from logging.handlers import RotatingFileHandler
 import sys
 from typing import Optional
 
@@ -38,9 +39,11 @@ def setup_logging(log_level: str = "INFO", log_file: str = None) -> logging.Logg
     console_handler.setFormatter(formatter)
     logger.addHandler(console_handler)
 
-    # File handler (optional)
+    # File handler (optional) with rotation: 5MB per file, 3 backups (20MB max)
     if log_file:
-        file_handler = logging.FileHandler(log_file)
+        file_handler = RotatingFileHandler(
+            log_file, maxBytes=5 * 1024 * 1024, backupCount=3
+        )
         file_handler.setFormatter(formatter)
         logger.addHandler(file_handler)
 

@@ -368,6 +368,7 @@ class FroniusModbusMQTT:
         try:
             # Determine health status
             mqtt_connected = self.mqtt_publisher.connected if self.mqtt_publisher else True
+            influxdb_connected = self.influxdb_publisher.connected if self.influxdb_publisher else True
 
             # Get poller status (includes sleep mode info)
             poller_status = {}
@@ -387,14 +388,21 @@ class FroniusModbusMQTT:
             else:
                 status = 'unhealthy'
 
+            # Disconnection counts
+            mqtt_disconnections = self.mqtt_publisher.disconnection_count if self.mqtt_publisher else 0
+            influxdb_disconnections = self.influxdb_publisher.disconnection_count if self.influxdb_publisher else 0
+
             with open(HEALTH_FILE, 'w') as f:
                 f.write(f"{int(time.time())}\n")
                 f.write(f"{status}\n")
                 f.write(f"mqtt:{mqtt_connected}\n")
+                f.write(f"influxdb:{influxdb_connected}\n")
                 f.write(f"modbus:{modbus_connected}\n")
                 f.write(f"sleep_mode:{in_sleep_mode}\n")
                 f.write(f"night_time:{is_night}\n")
                 f.write(f"uptime:{self._format_uptime()}\n")
+                f.write(f"mqtt_disconnections:{mqtt_disconnections}\n")
+                f.write(f"influxdb_disconnections:{influxdb_disconnections}\n")
         except Exception as e:
             self.log.warning(f"Failed to write health file: {e}")
 

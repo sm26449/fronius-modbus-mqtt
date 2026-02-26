@@ -45,15 +45,16 @@ def check_health():
         # Check status (second line)
         status = lines[1].strip()
 
-        # Parse additional fields
-        sleep_mode = False
-        is_night = False
-        for line in lines[4:]:
+        # Parse key:value fields (prefix-based, order-independent)
+        fields = {}
+        for line in lines[2:]:
             line = line.strip()
-            if line.startswith('sleep_mode:'):
-                sleep_mode = line.split(':')[1] == 'True'
-            elif line.startswith('night_time:'):
-                is_night = line.split(':')[1] == 'True'
+            if ':' in line:
+                key, _, value = line.partition(':')
+                fields[key] = value
+
+        sleep_mode = fields.get('sleep_mode') == 'True'
+        is_night = fields.get('night_time') == 'True'
 
         # Determine max age based on mode
         max_age = MAX_AGE_SLEEP if sleep_mode else MAX_AGE_SECONDS
@@ -69,36 +70,23 @@ def check_health():
 
         # In sleep mode, don't check Modbus (it's expected to be down)
         if status == 'sleep':
-            # Just verify MQTT is still connected (if enabled)
-            if len(lines) >= 3:
-                mqtt_line = lines[2].strip()
-                if mqtt_line.startswith('mqtt:'):
-                    mqtt_status = mqtt_line.split(':')[1]
-                    if mqtt_status == 'False':
-                        print("MQTT disconnected during sleep mode")
-                        return 1
+            if fields.get('mqtt') == 'False':
+                print("MQTT disconnected during sleep mode")
+                return 1
 
             mode_info = "(night)" if is_night else "(DataManager unavailable)"
             print(f"Sleep mode {mode_info} - last check {int(age)}s ago")
             return 0
 
-        # Check MQTT (third line) - optional
-        if len(lines) >= 3:
-            mqtt_line = lines[2].strip()
-            if mqtt_line.startswith('mqtt:'):
-                mqtt_status = mqtt_line.split(':')[1]
-                if mqtt_status == 'False':
-                    print("MQTT disconnected")
-                    return 1
+        # Check MQTT
+        if fields.get('mqtt') == 'False':
+            print("MQTT disconnected")
+            return 1
 
-        # Check Modbus (fourth line) - optional
-        if len(lines) >= 4:
-            modbus_line = lines[3].strip()
-            if modbus_line.startswith('modbus:'):
-                modbus_status = modbus_line.split(':')[1]
-                if modbus_status == 'False':
-                    print("Modbus disconnected")
-                    return 1
+        # Check Modbus
+        if fields.get('modbus') == 'False':
+            print("Modbus disconnected")
+            return 1
 
         print(f"Healthy (last check {int(age)}s ago)")
         return 0

@@ -972,7 +972,8 @@ class DevicePoller(threading.Thread):
                     break
                 if self._poll_inverter(device_info):
                     poll_success = True
-                time.sleep(self.poll_delay)
+                if self._stop_event.wait(self.poll_delay):
+                    break
 
             # Poll all meters
             for device_info in self.meters:
@@ -980,7 +981,8 @@ class DevicePoller(threading.Thread):
                     break
                 if self._poll_meter(device_info):
                     poll_success = True
-                time.sleep(self.poll_delay)
+                if self._stop_event.wait(self.poll_delay):
+                    break
 
             # Update status based on poll results
             if poll_success:
