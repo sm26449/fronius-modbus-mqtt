@@ -1,5 +1,6 @@
 """InfluxDB Publisher with batching and change detection"""
 
+import json
 import time
 import threading
 from typing import Dict, Any, Optional
@@ -292,7 +293,6 @@ class InfluxDBPublisher:
             if 'events' in data:
                 point = point.field("event_count", len(data['events']))
                 if data['events']:
-                    import json
                     # Store compact summary: codes + class per event register
                     evt_summary = []
                     for evt in data['events']:
