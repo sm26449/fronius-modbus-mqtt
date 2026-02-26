@@ -58,6 +58,19 @@ def _env_get(key: str, default: Any = None, type_cast: type = str) -> Any:
     return value
 
 
+class ConfigValidationError(ValueError):
+    """Raised when configuration values are invalid"""
+    pass
+
+
+def _validate_range(value, name: str, min_val=None, max_val=None):
+    """Validate a numeric value is within range"""
+    if min_val is not None and value < min_val:
+        raise ConfigValidationError(f"{name}={value} must be >= {min_val}")
+    if max_val is not None and value > max_val:
+        raise ConfigValidationError(f"{name}={value} must be <= {max_val}")
+
+
 @dataclass
 class ModbusConfig:
     """Modbus TCP connection settings"""
@@ -74,6 +87,16 @@ class ModbusConfig:
     ping_check_enabled: bool = True          # Check host availability with ping
     consecutive_failures_for_sleep: int = 3  # Enter sleep mode after N failures
 
+    def __post_init__(self):
+        _validate_range(self.port, "modbus.port", 1, 65535)
+        _validate_range(self.timeout, "modbus.timeout", 1, 60)
+        _validate_range(self.retry_attempts, "modbus.retry_attempts", 0, 20)
+        _validate_range(self.retry_delay, "modbus.retry_delay", 0, 30)
+        _validate_range(self.night_poll_interval, "modbus.night_poll_interval", 10, 3600)
+        _validate_range(self.night_start_hour, "modbus.night_start_hour", 0, 23)
+        _validate_range(self.night_end_hour, "modbus.night_end_hour", 0, 23)
+        _validate_range(self.consecutive_failures_for_sleep, "modbus.consecutive_failures_for_sleep", 1, 100)
+
 
 @dataclass
 class DevicesConfig:
@@ -83,6 +106,11 @@ class DevicesConfig:
     meter_poll_interval: float = 2.0    # Meter polling interval in seconds
     inverter_poll_delay: float = 1.0    # Delay between inverter reads in seconds
     inverter_read_delay_ms: int = 200   # Delay between register blocks within same inverter
+
+    def __post_init__(self):
+        _validate_range(self.meter_poll_interval, "devices.meter_poll_interval", 0.5, 300)
+        _validate_range(self.inverter_poll_delay, "devices.inverter_poll_delay", 0.1, 60)
+        _validate_range(self.inverter_read_delay_ms, "devices.inverter_read_delay_ms", 50, 5000)
 
 
 @dataclass
@@ -103,6 +131,11 @@ class MQTTConfig:
     tls_certfile: str = ""      # Path to client certificate file
     tls_keyfile: str = ""       # Path to client private key file
     tls_insecure: bool = False  # Skip hostname verification (for IP-based connections)
+
+    def __post_init__(self):
+        _validate_range(self.port, "mqtt.port", 1, 65535)
+        if self.qos not in (0, 1, 2):
+            raise ConfigValidationError(f"mqtt.qos={self.qos} must be 0, 1, or 2")
 
     def __repr__(self) -> str:
         masked_pw = "***" if self.password else ""
@@ -127,6 +160,13 @@ class InfluxDBConfig:
     verify_ssl: bool = True    # Verify SSL certificates
     ssl_ca_cert: str = ""      # Path to CA certificate file
 
+    def __post_init__(self):
+        _validate_range(self.write_interval, "influxdb.write_interval", 1, 3600)
+        if self.publish_mode and self.publish_mode not in ('changed', 'all'):
+            raise ConfigValidationError(
+                f"influxdb.publish_mode={self.publish_mode!r} must be 'changed', 'all', or empty"
+            )
+
     def __repr__(self) -> str:
         masked_token = "***" if self.token else ""
         return (
@@ -143,6 +183,19 @@ class GeneralConfig:
     log_file: str = ""
     poll_interval: int = 5
     publish_mode: str = "changed"  # 'changed' or 'all'
+
+    def __post_init__(self):
+        valid_levels = ('DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL')
+        if self.log_level.upper() not in valid_levels:
+            raise ConfigValidationError(
+                f"general.log_level={self.log_level!r} must be one of {valid_levels}"
+            )
+        self.log_level = self.log_level.upper()
+        _validate_range(self.poll_interval, "general.poll_interval", 1, 3600)
+        if self.publish_mode not in ('changed', 'all'):
+            raise ConfigValidationError(
+                f"general.publish_mode={self.publish_mode!r} must be 'changed' or 'all'"
+            )
 
 
 class ConfigLoader:

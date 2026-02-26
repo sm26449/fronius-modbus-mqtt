@@ -33,8 +33,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - InfluxDB token no longer exposed in process list (uses `curl -K` config file)
   - `MQTTConfig` and `InfluxDBConfig` mask secrets (password/token) in `__repr__` output
   - Example YAML config updated with TLS options
+- **InfluxDB Controls Persistence**
+  - Inverter controls (Model 123/SunSpec) persisted to `fronius_controls` measurement
+  - Tracks power limit, power factor, VAR settings with change detection
+- **Configuration Validation**
+  - `__post_init__()` on all config dataclasses validates ranges at load time
+  - `ConfigValidationError` with clear messages (e.g., `modbus.port=0 must be >= 1`)
+  - Validates: ports, timeouts, poll intervals, QoS, log levels, publish modes
 
 ### Changed
+- **pymodbus 3.11+ Upgrade**
+  - Migrated from pymodbus 3.9.x to 3.11+ (`slave=` → `device_id=` API change)
+  - Benefits: DoS vulnerability fix, stricter TCP protocol validation, dev_id/tid response checks
+- **Dependency Upper Bounds**
+  - All dependencies now have upper bounds to prevent breaking upgrades
+  - `pymodbus>=3.11.0,<4.0.0`, `paho-mqtt<3.0.0`, `pyyaml<7.0.0`, `influxdb-client<2.0.0`
 - **Thread Safety**
   - `self.connected` (bool) replaced with `threading.Event()` + property in both publishers
   - InfluxDB `_setup_client()` and `write_api.write()` protected by `self.lock`

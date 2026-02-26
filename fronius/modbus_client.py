@@ -170,7 +170,7 @@ class ModbusConnection:
                     result = self.client.read_holding_registers(
                         address=address - 1,  # pymodbus is 0-indexed
                         count=count,
-                        slave=unit_id
+                        device_id=unit_id
                     )
 
                     if not result.isError() and result.registers:
