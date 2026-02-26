@@ -194,26 +194,49 @@ Configuration can also be set via environment variables (useful for Docker):
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `MODBUS_HOST` | Fronius DataManager IP | `192.168.1.100` |
+| **General** | | |
+| `LOG_LEVEL` | Logging level | `INFO` |
+| `LOG_FILE` | Log file path | `` |
+| `POLL_INTERVAL` | Polling interval (s) | `5` |
+| `PUBLISH_MODE` | `changed` or `all` | `changed` |
+| `FRONIUS_CONFIG` | Path to YAML config file | `` |
+| **Modbus** | | |
+| `MODBUS_HOST` | Fronius DataManager IP | _(required)_ |
 | `MODBUS_PORT` | Modbus TCP port | `502` |
 | `MODBUS_TIMEOUT` | Connection timeout (s) | `3` |
+| `MODBUS_RETRY_ATTEMPTS` | Retries per read | `2` |
+| `MODBUS_RETRY_DELAY` | Delay between retries (s) | `0.1` |
+| **Devices** | | |
 | `INVERTER_IDS` | Comma-separated inverter IDs | `1` |
 | `METER_IDS` | Comma-separated meter IDs | `240` |
+| `METER_POLL_INTERVAL` | Meter polling interval (s) | `2.0` |
+| `INVERTER_POLL_DELAY` | Delay between inverter reads (s) | `1.0` |
+| `INVERTER_READ_DELAY_MS` | Delay between register blocks (ms) | `200` |
+| **Night Mode** | | |
+| `NIGHT_MODE_ENABLED` | Enable night/sleep detection | `true` |
+| `NIGHT_POLL_INTERVAL` | Poll interval during sleep (s) | `300` |
+| `NIGHT_START_HOUR` | Night start hour (24h) | `21` |
+| `NIGHT_END_HOUR` | Night end hour (24h) | `6` |
+| `PING_CHECK_ENABLED` | Ping host before connect | `true` |
+| `CONSECUTIVE_FAILURES_FOR_SLEEP` | Failures before sleep mode | `3` |
+| **MQTT** | | |
 | `MQTT_ENABLED` | Enable MQTT publishing | `true` |
 | `MQTT_BROKER` | MQTT broker address | `localhost` |
 | `MQTT_PORT` | MQTT broker port | `1883` |
 | `MQTT_USERNAME` | MQTT username | `` |
 | `MQTT_PASSWORD` | MQTT password | `` |
 | `MQTT_PREFIX` | MQTT topic prefix | `fronius` |
+| `MQTT_RETAIN` | Retain messages | `true` |
+| `MQTT_QOS` | QoS level (0, 1, 2) | `0` |
 | `HA_DISCOVERY_ENABLED` | Enable HA autodiscovery | `false` |
+| **InfluxDB** | | |
 | `INFLUXDB_ENABLED` | Enable InfluxDB | `false` |
-| `INFLUXDB_URL` | InfluxDB URL | `http://localhost:8086` |
+| `INFLUXDB_URL` | InfluxDB URL | `` |
 | `INFLUXDB_TOKEN` | InfluxDB API token | `` |
-| `INFLUXDB_ORG` | InfluxDB organization | `homelab` |
+| `INFLUXDB_ORG` | InfluxDB organization | `` |
 | `INFLUXDB_BUCKET` | InfluxDB bucket | `fronius` |
-| `LOG_LEVEL` | Logging level | `INFO` |
-| `POLL_INTERVAL` | Polling interval (s) | `5` |
-| `PUBLISH_MODE` | `changed` or `all` | `changed` |
+| `INFLUXDB_WRITE_INTERVAL` | Min seconds between writes per device | `5` |
+| `INFLUXDB_PUBLISH_MODE` | Override publish mode for InfluxDB | `` |
 
 ## Command Line Options
 
@@ -329,34 +352,47 @@ fronius/meter/240/W               # Meter power
 
 ## InfluxDB Measurements
 
+For the complete InfluxDB schema with all tags, fields, example Flux queries, and write configuration, see **[INFLUXDB_SCHEMA.md](INFLUXDB_SCHEMA.md)**.
+
 ### fronius_inverter
 | Field | Type | Description |
 |-------|------|-------------|
 | ac_power | float | AC power output (W) |
-| dc_power | float | DC power input (W) |
-| ac_voltage_an/bn/cn | float | Phase voltages (V) |
-| ac_current | float | AC current (A) |
+| ac_current, ac_current_a/b/c | float | AC current total and per-phase (A) |
+| ac_voltage_an/bn/cn | float | Line-to-neutral voltages (V) |
+| ac_voltage_ab/bc/ca | float | Line-to-line voltages (V) |
 | ac_frequency | float | Grid frequency (Hz) |
+| dc_power | float | DC power input (W) |
+| dc_voltage | float | DC voltage (V) |
+| dc_current | float | DC current (A) |
+| power_factor | float | Power factor (-1.0 to 1.0) |
+| apparent_power | float | Apparent power (VA) |
+| reactive_power | float | Reactive power (var) |
 | lifetime_energy | float | Total energy produced (Wh) |
+| temp_cabinet/heatsink/transformer/other | float | Temperatures (C) |
 | status_code | int | Operating status code |
 | status_alarm | bool | Alarm flag |
 | event_count | int | Number of active events |
 | events_json | string | JSON array with decoded event codes, descriptions and class |
-| string{n}_current | float | MPPT string N current (A) |
-| string{n}_voltage | float | MPPT string N voltage (V) |
-| string{n}_power | float | MPPT string N power (W) |
-| string{n}_energy | float | MPPT string N lifetime energy (Wh) |
+| mppt_num_modules | int | Number of MPPT modules |
+| string{N}_current | float | MPPT string N current (A) |
+| string{N}_voltage | float | MPPT string N voltage (V) |
+| string{N}_power | float | MPPT string N power (W) |
+| string{N}_energy | float | MPPT string N lifetime energy (Wh) |
 
 ### fronius_meter
 | Field | Type | Description |
 |-------|------|-------------|
-| power_total | float | Total power (W) |
-| power_a/b/c | float | Per-phase power (W) |
-| voltage_an/bn/cn | float | Phase voltages (V) |
-| current_a/b/c | float | Per-phase current (A) |
+| power_total, power_a/b/c | float | Active power total and per-phase (W) |
+| current_total, current_a/b/c | float | Current total and per-phase (A) |
+| voltage_ln_avg, voltage_an/bn/cn | float | Line-to-neutral voltages (V) |
+| voltage_ll_avg, voltage_ab/bc/ca | float | Line-to-line voltages (V) |
 | frequency | float | Grid frequency (Hz) |
-| energy_exported | float | Energy exported (Wh) |
-| energy_imported | float | Energy imported (Wh) |
+| va_total, va_a/b/c | float | Apparent power (VA) |
+| var_total, var_a/b/c | float | Reactive power (var) |
+| pf_avg, pf_a/b/c | float | Power factor (-1.0 to 1.0) |
+| energy_exported, energy_exported_a/b/c | float | Energy exported to grid (Wh) |
+| energy_imported, energy_imported_a/b/c | float | Energy imported from grid (Wh) |
 
 ## Project Structure
 
@@ -364,6 +400,7 @@ fronius/meter/240/W               # Meter power
 fronius-modbus-mqtt/
 ├── fronius_modbus_mqtt.py      # Main entry point
 ├── fronius/                    # Python package
+│   ├── __init__.py             # Version and exports
 │   ├── config.py               # YAML configuration loader
 │   ├── modbus_client.py        # Modbus TCP client with autodiscovery
 │   ├── register_parser.py      # SunSpec register parsing
@@ -375,9 +412,15 @@ fronius-modbus-mqtt/
 │   ├── fronius_modbus_mqtt.example.yaml  # Example configuration
 │   ├── registers.json          # Modbus register definitions
 │   └── FroniusEventFlags.json  # Event flag mappings
-├── Dockerfile
-├── docker-compose.yml
-└── requirements.txt
+├── Dockerfile                  # Container image definition
+├── entrypoint.sh               # Container startup with config init
+├── healthcheck.py              # Docker healthcheck script
+├── docker-compose.yml          # Development compose
+├── docker-compose.production.yml  # Production compose
+├── requirements.txt
+├── CHANGELOG.md                # Version history
+├── INFLUXDB_SCHEMA.md          # Complete InfluxDB schema reference
+└── INTERNAL.md                 # Internal technical documentation
 ```
 
 ## SunSpec Models
