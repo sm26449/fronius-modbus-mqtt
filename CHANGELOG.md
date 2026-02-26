@@ -5,6 +5,35 @@ All notable changes to Fronius Modbus MQTT will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.1] - 2026-02-26
+
+### Added
+- **InfluxDB Storage Persistence** (Model 124)
+  - New `fronius_storage` measurement with charge state, battery voltage, rates, ramps, grid charging
+  - Change detection via `_should_write()` to avoid redundant writes
+  - Wired from main publish callback alongside MQTT storage publishing
+- **MPPT String Temperature**
+  - `string{N}_temperature` field added to `fronius_inverter` InfluxDB measurement
+- **Extended HA Storage Discovery**
+  - Storage sensors expanded from 4 to 13: added OutWRte, InWRte, MinRsvPct, StorAval,
+    WDisChaGra, WChaGra, VAChaMax, StorCtl_Mod, ChaGriSet
+- **InfluxDB Healthcheck Validation**
+  - Health file now includes `influxdb_enabled` field
+  - Healthcheck marks container unhealthy when InfluxDB is enabled but disconnected
+- **`.dockerignore`** - Reduces Docker build context by excluding .git, __pycache__, docs, etc.
+
+### Fixed
+- **MPPT Log Noise** - Per-string log demoted from INFO to DEBUG (~480 lines/min reduction at INFO)
+- **Controls Write Isolation** - `_write_controls_data` error no longer marks entire inverter write as failed
+- **`_should_publish` Thread Safety** - Return moved inside lock block (mqtt_publisher)
+- **`_should_write` Thread Safety** - Rate limiting and change detection fully under lock (influxdb_publisher)
+- **InfluxDB Reconnect Thread Safety** - `self.client` read under lock in `_reconnect_loop`
+- **Bucket Existence Check** - Entrypoint uses JSON parsing instead of fragile `grep 'not found'`
+
+### Removed
+- Dead code: `InverterPoller`, `MeterPoller` backward-compat wrappers, `poll_all_devices`,
+  duplicate `parse_mppt_measurements` in register_parser
+
 ## [1.4.0] - 2026-02-26
 
 ### Added
@@ -374,6 +403,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 | Version | Date | Highlights |
 |---------|------|------------|
+| 1.4.1 | 2026-02-26 | Storage InfluxDB, MPPT temp, thread safety, HA discovery expansion |
 | 1.4.0 | 2026-02-26 | Resilient reconnection, data loss prevention, graceful shutdown |
 | 1.3.1 | 2026-02-26 | InfluxDB events_json field for fault event persistence |
 | 1.3.0 | 2026-02-04 | Runtime monitoring with per-device status, error tracking, uptime |

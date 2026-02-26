@@ -116,6 +116,7 @@ Dynamic fields per MPPT string (N = 1, 2, ...):
 | `string{N}_voltage` | float | V | String N DC voltage |
 | `string{N}_power` | float | W | String N DC power |
 | `string{N}_energy` | float | Wh | String N lifetime energy |
+| `string{N}_temperature` | float | C | String N module temperature |
 
 Typical configurations:
 - **Primo** (single-phase): 2 strings (`string1_*`, `string2_*`)
@@ -129,6 +130,36 @@ Typical configurations:
 | 2 | Fronius Symo Advanced 20.0-3-M | 20 kW | 34439632 |
 | 3 | Fronius Symo Advanced 17.5-3-M | 17.5 kW | 34312229 |
 | 4 | Fronius Symo 17.5-3-M | 17.5 kW | 31459301 |
+
+---
+
+## Measurement: `fronius_storage`
+
+Battery storage data from inverters with storage support (SunSpec Model 124).
+
+### Tags
+
+| Tag | Type | Description | Example |
+|-----|------|-------------|---------|
+| `device_id` | string | Modbus unit ID (inverter) | `1` |
+| `device_type` | string | Always `inverter` | `inverter` |
+| `serial_number` | string | Inverter serial number | `34559971` |
+
+### Fields
+
+| Field | Type | Unit | Description |
+|-------|------|------|-------------|
+| `charge_state_pct` | float | % | State of charge |
+| `battery_voltage` | float | V | Internal battery voltage |
+| `max_charge_power` | float | W | Maximum charge power |
+| `charge_status_code` | float | - | Charge status enum (1=OFF, 2=EMPTY, 3=DISCHARGING, 4=CHARGING, 5=FULL, 6=HOLDING, 7=TESTING) |
+| `discharge_rate_pct` | float | % | Discharge rate (% of WDisChaMax) |
+| `charge_rate_pct` | float | % | Charge rate (% of WChaMax) |
+| `min_reserve_pct` | float | % | Minimum reserve percentage |
+| `available_storage_ah` | float | Ah | Available storage capacity |
+| `charge_ramp_rate` | float | %/s | Charge ramp rate (% WChaMax/sec) |
+| `discharge_ramp_rate` | float | %/s | Discharge ramp rate (% WChaMax/sec) |
+| `grid_charging_code` | float | - | Grid charging setting (0=PV, 1=GRID) |
 
 ---
 

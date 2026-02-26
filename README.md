@@ -1,6 +1,6 @@
 # Fronius Modbus MQTT
 
-[![Version](https://img.shields.io/badge/version-1.4.0-blue.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-1.4.1-blue.svg)](CHANGELOG.md)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
 Python application that reads data from Fronius inverters and smart meters via Modbus TCP and publishes to MQTT and/or InfluxDB.
@@ -387,6 +387,22 @@ For the complete InfluxDB schema with all tags, fields, example Flux queries, an
 | string{N}_voltage | float | MPPT string N voltage (V) |
 | string{N}_power | float | MPPT string N power (W) |
 | string{N}_energy | float | MPPT string N lifetime energy (Wh) |
+| string{N}_temperature | float | MPPT string N temperature (C) |
+
+### fronius_storage
+| Field | Type | Description |
+|-------|------|-------------|
+| charge_state_pct | float | State of charge (%) |
+| battery_voltage | float | Battery voltage (V) |
+| max_charge_power | float | Max charge power (W) |
+| charge_status_code | float | Charge status enum |
+| discharge_rate_pct | float | Discharge rate (% WDisChaMax) |
+| charge_rate_pct | float | Charge rate (% WChaMax) |
+| min_reserve_pct | float | Minimum reserve (%) |
+| available_storage_ah | float | Available storage (Ah) |
+| charge_ramp_rate | float | Charge ramp rate (%/s) |
+| discharge_ramp_rate | float | Discharge ramp rate (%/s) |
+| grid_charging_code | float | Grid charging setting enum |
 
 ### fronius_meter
 | Field | Type | Description |
