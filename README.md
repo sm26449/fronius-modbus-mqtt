@@ -516,9 +516,11 @@ sudo ./install.sh
 
 Found a bug or have a feature request? Please open an issue on [GitHub Issues](https://github.com/sm26449/fronius-modbus-mqtt/issues).
 
-## Author
+## Authors
 
 **Stefan M** - [sm26449@diysolar.ro](mailto:sm26449@diysolar.ro)
+
+**Claude** (Anthropic) - Pair programming partner
 
 ## License
 
