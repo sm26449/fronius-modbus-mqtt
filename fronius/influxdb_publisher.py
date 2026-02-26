@@ -288,9 +288,22 @@ class InfluxDBPublisher:
                 point = point.field("status_code", data['status'].get('code', 0))
                 point = point.field("status_alarm", data['status'].get('alarm', False))
 
-            # Event count
+            # Event count + detailed codes (JSON string for InfluxDB)
             if 'events' in data:
                 point = point.field("event_count", len(data['events']))
+                if data['events']:
+                    import json
+                    # Store compact summary: codes + class per event register
+                    evt_summary = []
+                    for evt in data['events']:
+                        codes = [c['code'] for c in evt.get('codes_decoded', [])]
+                        descs = [c['description'] for c in evt.get('codes_decoded', [])]
+                        evt_summary.append({
+                            'codes': codes,
+                            'descriptions': descs,
+                            'class': evt.get('class', ''),
+                        })
+                    point = point.field("events_json", json.dumps(evt_summary))
 
             # MPPT string data (DC per string)
             if 'mppt' in data and data['mppt']:
