@@ -289,7 +289,7 @@ class MQTTPublisher:
         self.config = config
         self.publish_mode = publish_mode
         self.client: mqtt.Client = None
-        self.connected = False
+        self._connected = threading.Event()
         self.last_values: Dict[str, Any] = {}
         self.lock = threading.Lock()
         self.log = get_logger()
@@ -298,13 +298,28 @@ class MQTTPublisher:
         self.messages_published = 0
         self.messages_skipped = 0
         self.connection_count = 0
+        self.disconnection_count = 0
 
         # Reconnection thread control
         self._stop_reconnect = threading.Event()
         self._reconnect_thread = None
+        self._loop_started = False  # Track if paho network loop is running
 
         if config.enabled:
             self._setup_client()
+
+    @property
+    def connected(self) -> bool:
+        return self._connected.is_set()
+
+    @connected.setter
+    def connected(self, value: bool):
+        if value:
+            self._connected.set()
+        else:
+            if self._connected.is_set():
+                self.disconnection_count += 1
+            self._connected.clear()
 
     def _setup_client(self):
         """Setup MQTT client with callbacks"""
@@ -315,6 +330,10 @@ class MQTTPublisher:
                 self.config.username,
                 self.config.password
             )
+
+        # Max outgoing queue size for QoS >= 1 messages.
+        # QoS 0 messages are fire-and-forget (not queued when disconnected).
+        self.client.max_queued_messages_set(1000)
 
         # Set Last Will Testament for crash/disconnect detection
         status_topic = f"{self.config.topic_prefix}/status"
@@ -337,16 +356,18 @@ class MQTTPublisher:
             self.log.error(f"MQTT connection failed: {reason_code}")
 
     def _on_disconnect(self, client, userdata, flags, reason_code, properties=None):
-        """Handle disconnection"""
+        """Handle disconnection. Paho auto-reconnects; monitor thread logs state."""
         self.connected = False
         if reason_code != 0:
             self.log.warning(f"MQTT disconnected unexpectedly: {reason_code}")
-            # Start background reconnection
-            self._start_reconnect_thread()
 
     def _try_connect(self) -> bool:
         """
         Attempt a single connection to MQTT broker.
+
+        Only call this when paho's network loop is NOT yet running.
+        After the first successful connection, paho handles reconnection
+        automatically via reconnect_delay_set().
 
         Returns:
             True if connection successful
@@ -358,6 +379,7 @@ class MQTTPublisher:
                 keepalive=60
             )
             self.client.loop_start()
+            self._loop_started = True
 
             # Wait briefly for connection
             for _ in range(10):
@@ -386,6 +408,8 @@ class MQTTPublisher:
 
         for attempt in range(1, RETRY_MAX_ATTEMPTS + 1):
             if self._try_connect():
+                # Always start persistent monitor thread
+                self._start_reconnect_thread()
                 return True
 
             if attempt < RETRY_MAX_ATTEMPTS:
@@ -400,6 +424,7 @@ class MQTTPublisher:
             f"MQTT: all {RETRY_MAX_ATTEMPTS} connection attempts failed. "
             "Will continue trying in background."
         )
+        # Always start persistent monitor thread
         self._start_reconnect_thread()
         return False
 
@@ -418,15 +443,36 @@ class MQTTPublisher:
         self.log.info("MQTT reconnection thread started")
 
     def _reconnect_loop(self):
-        """Background loop that attempts to reconnect to MQTT broker"""
+        """Persistent background loop that monitors MQTT connection state.
+
+        When paho's network loop is running (_loop_started=True), paho handles
+        reconnection automatically via reconnect_delay_set(). This thread only
+        monitors and logs state changes.
+
+        When paho's loop was never started (initial connect failed), this thread
+        retries _try_connect() to establish the first connection.
+        """
+        was_connected = self.connected
         while not self._stop_reconnect.is_set():
             if not self.connected:
-                self.log.debug("Attempting MQTT reconnection...")
-                if self._try_connect():
-                    self.log.info("MQTT reconnected successfully")
-                    break
+                if was_connected:
+                    # State transition: connected -> disconnected
+                    self.log.warning("MQTT connection lost, paho auto-reconnect active")
+                    was_connected = False
 
-            # Wait before next attempt
+                if not self._loop_started:
+                    # Paho loop never started — need manual connect
+                    self.log.debug("Attempting MQTT initial connection...")
+                    if self._try_connect():
+                        self.log.info("MQTT connected successfully")
+                        was_connected = True
+            else:
+                if not was_connected:
+                    # State transition: disconnected -> connected
+                    self.log.info("MQTT reconnected successfully")
+                    was_connected = True
+
+            # Wait before next check
             self._stop_reconnect.wait(RECONNECT_CHECK_INTERVAL)
 
     def disconnect(self):
@@ -489,6 +535,9 @@ class MQTTPublisher:
         """
         Internal publish method.
 
+        With QoS 0 (default), messages are dropped if disconnected.
+        With QoS >= 1, paho queues messages internally for delivery on reconnect.
+
         Args:
             topic: MQTT topic
             payload: String payload
@@ -497,7 +546,7 @@ class MQTTPublisher:
         Returns:
             True if published successfully
         """
-        if not self.connected:
+        if not self.client:
             return False
 
         if retain is None:
@@ -514,21 +563,20 @@ class MQTTPublisher:
             if result.rc == mqtt.MQTT_ERR_SUCCESS:
                 self.messages_published += 1
                 return True
+            elif result.rc == mqtt.MQTT_ERR_QUEUE_SIZE:
+                self.log.warning("MQTT outgoing queue full, message dropped")
+                return False
             elif result.rc in (mqtt.MQTT_ERR_NO_CONN, mqtt.MQTT_ERR_CONN_LOST):
-                # Connection lost during publish
-                self.log.warning("MQTT connection lost during publish")
+                # Connection lost but message may be queued
                 self.connected = False
-                self._start_reconnect_thread()
 
             return False
 
         except Exception as e:
             error_str = str(e).lower()
-            # Check for connection-related errors
             if any(err in error_str for err in ['connection', 'socket', 'broken pipe']):
                 self.log.warning(f"MQTT connection error during publish: {e}")
                 self.connected = False
-                self._start_reconnect_thread()
             else:
                 self.log.error(f"MQTT publish error: {e}")
             return False
@@ -578,11 +626,13 @@ class MQTTPublisher:
         """
         Publish all inverter data fields using SunSpec names.
 
+        With QoS 0, messages are dropped if disconnected (fire-and-forget).
+
         Args:
             device_id: Device identifier
             data: Parsed inverter data dictionary
         """
-        if not self.connected:
+        if not self.client:
             return
 
         device_type = 'inverter'
@@ -691,11 +741,13 @@ class MQTTPublisher:
         """
         Publish all meter data fields using SunSpec names.
 
+        With QoS 0, messages are dropped if disconnected (fire-and-forget).
+
         Args:
             device_id: Device identifier
             data: Parsed meter data dictionary
         """
-        if not self.connected:
+        if not self.client:
             return
 
         device_type = 'meter'
@@ -716,11 +768,13 @@ class MQTTPublisher:
         """
         Publish all storage (battery) data fields using SunSpec names.
 
+        With QoS 0, messages are dropped if disconnected (fire-and-forget).
+
         Args:
             device_id: Device identifier (inverter serial number)
             data: Parsed storage data dictionary from Model 124
         """
-        if not self.connected:
+        if not self.client:
             return
 
         device_type = 'storage'
@@ -1187,5 +1241,6 @@ class MQTTPublisher:
             'messages_published': self.messages_published,
             'messages_skipped': self.messages_skipped,
             'publish_mode': self.publish_mode,
-            'connection_count': self.connection_count
+            'connection_count': self.connection_count,
+            'disconnection_count': self.disconnection_count
         }

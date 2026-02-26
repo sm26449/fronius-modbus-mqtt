@@ -40,7 +40,7 @@ class InfluxDBPublisher:
         self.publish_mode = publish_mode
         self.client = None
         self.write_api = None
-        self.connected = False
+        self._connected = threading.Event()
         self.last_values: Dict[str, Dict] = {}
         self.last_write_time: Dict[str, float] = {}
         self.lock = threading.Lock()
@@ -49,6 +49,7 @@ class InfluxDBPublisher:
         # Stats
         self.writes_total = 0
         self.writes_failed = 0
+        self.disconnection_count = 0
 
         # Reconnection thread control
         self._stop_reconnect = threading.Event()
@@ -56,58 +57,87 @@ class InfluxDBPublisher:
 
         if config.enabled:
             self._setup_client_with_retry()
-            # Start background reconnection thread if not connected
-            if not self.connected:
-                self._start_reconnect_thread()
+            # Always start persistent monitor thread
+            self._start_reconnect_thread()
+
+    @property
+    def connected(self) -> bool:
+        return self._connected.is_set()
+
+    @connected.setter
+    def connected(self, value: bool):
+        if value:
+            self._connected.set()
+        else:
+            if self._connected.is_set():
+                self.disconnection_count += 1
+            self._connected.clear()
+
+    def _on_write_error(self, conf, data, exception):
+        """Callback when InfluxDB batch write fails permanently (all retries exhausted)"""
+        self.log.error(f"InfluxDB data lost permanently: {exception}")
+        self._handle_write_error(exception)
+
+    def _on_write_retry(self, conf, data, exception):
+        """Callback when InfluxDB batch write is being retried"""
+        self.log.warning(f"InfluxDB write retry: {exception}")
 
     def _setup_client(self):
-        """Setup InfluxDB client"""
-        try:
-            from influxdb_client import InfluxDBClient, WriteOptions
+        """Setup InfluxDB client (protected by self.lock)"""
+        with self.lock:
+            try:
+                from influxdb_client import InfluxDBClient, WriteOptions
 
-            # Clean up old connections first
-            if self.write_api:
-                try:
-                    self.write_api.close()
-                except Exception:
-                    pass
-            if self.client:
-                try:
-                    self.client.close()
-                except Exception:
-                    pass
+                # Clean up old connections first
+                if self.write_api:
+                    try:
+                        self.write_api.close()
+                    except Exception:
+                        pass
+                if self.client:
+                    try:
+                        self.client.close()
+                    except Exception:
+                        pass
 
-            self.client = InfluxDBClient(
-                url=self.config.url,
-                token=self.config.token,
-                org=self.config.org
-            )
+                self.client = InfluxDBClient(
+                    url=self.config.url,
+                    token=self.config.token,
+                    org=self.config.org
+                )
 
-            self.write_api = self.client.write_api(write_options=WriteOptions(
-                batch_size=100,
-                flush_interval=10_000,
-                jitter_interval=2_000,
-                retry_interval=5_000,
-                max_retries=3
-            ))
+                self.write_api = self.client.write_api(
+                    write_options=WriteOptions(
+                        batch_size=100,
+                        flush_interval=10_000,
+                        jitter_interval=2_000,
+                        retry_interval=5_000,
+                        max_retries=10,
+                        max_retry_time=300_000,
+                        exponential_base=2,
+                    ),
+                    error_callback=self._on_write_error,
+                    success_callback=None,
+                    retry_callback=self._on_write_retry,
+                )
 
-            # Test connection
-            health = self.client.health()
-            if health.status == "pass":
-                self.connected = True
-                self.log.info(f"InfluxDB connected to {self.config.url}")
-            else:
-                self.log.warning(f"InfluxDB health check failed: {health.message}")
+                # Test connection
+                health = self.client.health()
+                if health.status == "pass":
+                    self.connected = True
+                    self.log.info(f"InfluxDB connected to {self.config.url}")
+                else:
+                    self.log.warning(f"InfluxDB health check failed: {health.message}")
 
-        except ImportError:
-            self.log.warning(
-                "influxdb-client not installed. "
-                "Install with: pip install influxdb-client"
-            )
-            self.config.enabled = False
-        except Exception as e:
-            self.log.warning(f"InfluxDB health check failed: {e}")
-            self.connected = False
+            except ImportError:
+                self.log.warning(
+                    "influxdb-client not installed. "
+                    "Install with: pip install influxdb-client"
+                )
+                self.config.enabled = False
+            except Exception as e:
+                self.log.warning(f"InfluxDB health check failed: {e}")
+                self.connected = False
 
     def _setup_client_with_retry(self):
         """Setup InfluxDB client with retry logic"""
@@ -147,17 +177,31 @@ class InfluxDBPublisher:
         self.log.info("InfluxDB reconnection thread started")
 
     def _reconnect_loop(self):
-        """Background loop that attempts to reconnect to InfluxDB"""
+        """Persistent background loop that monitors and reconnects to InfluxDB.
+
+        When connected, performs periodic health checks to detect disconnections
+        faster than waiting for batch retry exhaustion (up to 5 min).
+        When disconnected, attempts reconnection every RECONNECT_CHECK_INTERVAL.
+        """
         while not self._stop_reconnect.is_set():
-            if not self.connected:
+            if self.connected:
+                # Proactive health check — detect disconnection early
+                try:
+                    health = self.client.health()
+                    if health.status != "pass":
+                        self.log.warning(f"InfluxDB health check failed: {health.message}")
+                        self.connected = False
+                except Exception as e:
+                    self.log.warning(f"InfluxDB health check failed: {e}")
+                    self.connected = False
+            else:
                 self.log.debug("Attempting InfluxDB reconnection...")
                 self._setup_client()
 
                 if self.connected:
                     self.log.info("InfluxDB reconnected successfully")
-                    break
 
-            # Wait before next attempt
+            # Wait before next check
             self._stop_reconnect.wait(RECONNECT_CHECK_INTERVAL)
 
     def _handle_write_error(self, error: Exception):
@@ -184,9 +228,8 @@ class InfluxDBPublisher:
         is_connection_error = any(err in error_str for err in connection_errors)
 
         if is_connection_error and self.connected:
-            self.log.warning("InfluxDB connection lost, starting reconnection...")
+            self.log.warning("InfluxDB connection lost, monitor thread will reconnect")
             self.connected = False
-            self._start_reconnect_thread()
 
     def is_enabled(self) -> bool:
         """Check if InfluxDB publishing is enabled and connected"""
@@ -321,7 +364,8 @@ class InfluxDBPublisher:
                         if module.get('dc_energy') is not None:
                             point = point.field(f"string{i}_energy", float(module['dc_energy']))
 
-            self.write_api.write(bucket=self.config.bucket, record=point)
+            with self.lock:
+                self.write_api.write(bucket=self.config.bucket, record=point)
             self.writes_total += 1
 
         except Exception as e:
@@ -375,7 +419,8 @@ class InfluxDBPublisher:
                 if field in data and data[field] is not None:
                     point = point.field(field, float(data[field]))
 
-            self.write_api.write(bucket=self.config.bucket, record=point)
+            with self.lock:
+                self.write_api.write(bucket=self.config.bucket, record=point)
             self.writes_total += 1
 
         except Exception as e:
@@ -422,5 +467,6 @@ class InfluxDBPublisher:
             'bucket': self.config.bucket,
             'writes_total': self.writes_total,
             'writes_failed': self.writes_failed,
-            'publish_mode': self.publish_mode
+            'publish_mode': self.publish_mode,
+            'disconnection_count': self.disconnection_count
         }
