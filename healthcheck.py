@@ -83,6 +83,11 @@ def check_health():
             print("MQTT disconnected")
             return 1
 
+        # Check InfluxDB (only if enabled)
+        if fields.get('influxdb_enabled') == 'True' and fields.get('influxdb') == 'False':
+            print("InfluxDB disconnected")
+            return 1
+
         # Check Modbus
         if fields.get('modbus') == 'False':
             print("Modbus disconnected")

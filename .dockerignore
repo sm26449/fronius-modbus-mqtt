@@ -1,0 +1,11 @@
+.git
+__pycache__
+*.pyc
+*.pyo
+storage/
+docker-compose*.yml
+service*.yaml
+*.md
+LICENSE
+.claude/
+register_scan_results.json

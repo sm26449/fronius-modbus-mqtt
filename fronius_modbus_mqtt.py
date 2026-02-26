@@ -370,6 +370,7 @@ class FroniusModbusMQTT:
             # Determine health status
             mqtt_connected = self.mqtt_publisher.connected if self.mqtt_publisher else True
             influxdb_connected = self.influxdb_publisher.connected if self.influxdb_publisher else True
+            influxdb_enabled = bool(self.influxdb_publisher and self.influxdb_publisher.config.enabled)
 
             # Get poller status (includes sleep mode info)
             poller_status = {}
@@ -398,6 +399,7 @@ class FroniusModbusMQTT:
                 f.write(f"{status}\n")
                 f.write(f"mqtt:{mqtt_connected}\n")
                 f.write(f"influxdb:{influxdb_connected}\n")
+                f.write(f"influxdb_enabled:{influxdb_enabled}\n")
                 f.write(f"modbus:{modbus_connected}\n")
                 f.write(f"sleep_mode:{in_sleep_mode}\n")
                 f.write(f"night_time:{is_night}\n")

@@ -41,8 +41,10 @@ if [ "${INFLUXDB_ENABLED}" = "true" ] && [ -n "${INFLUXDB_URL}" ] && [ -n "${INF
         BUCKET_RESPONSE=$(curl -s -K "$CURL_AUTH_CONFIG" \
             "${INFLUXDB_URL}/api/v2/buckets?name=${INFLUXDB_BUCKET}&org=${INFLUXDB_ORG}")
 
-        # Check if response contains "not found" error (handle multiline JSON)
-        if echo "$BUCKET_RESPONSE" | grep -q 'not found'; then
+        # Check if response contains empty buckets array or error
+        if echo "$BUCKET_RESPONSE" | tr -d '\t\n ' | grep -q '"buckets":\[\]'; then
+            BUCKET_EXISTS="0"
+        elif echo "$BUCKET_RESPONSE" | grep -q '"code"'; then
             BUCKET_EXISTS="0"
         else
             BUCKET_EXISTS="1"

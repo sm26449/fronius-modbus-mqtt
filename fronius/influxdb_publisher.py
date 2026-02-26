@@ -189,7 +189,13 @@ class InfluxDBPublisher:
             if self.connected:
                 # Proactive health check — detect disconnection early
                 try:
-                    health = self.client.health()
+                    with self.lock:
+                        client = self.client
+                    if not client:
+                        self.connected = False
+                        self._stop_reconnect.wait(RECONNECT_CHECK_INTERVAL)
+                        continue
+                    health = client.health()
                     if health.status != "pass":
                         self.log.warning(f"InfluxDB health check failed: {health.message}")
                         self.connected = False
