@@ -370,10 +370,63 @@ class InfluxDBPublisher:
                 self.write_api.write(bucket=self.config.bucket, record=point)
             self.writes_total += 1
 
+            # Write controls data as separate measurement (Model 123, read every 60s)
+            if 'controls' in data and data['controls']:
+                self._write_controls_data(device_id, data)
+
         except Exception as e:
             self.writes_failed += 1
             self.log.error(f"InfluxDB write error for inverter {device_id}: {e}")
             self._handle_write_error(e)
+
+    def _write_controls_data(self, device_id: str, data: Dict):
+        """
+        Write inverter controls data (Model 123) to InfluxDB as separate measurement.
+
+        Only called when controls data is present in the inverter data dict.
+        Uses change detection via _should_write to avoid redundant writes.
+        """
+        ctrl = data['controls']
+        key = f"controls_{device_id}"
+        if not self._should_write(key, ctrl):
+            return
+
+        from influxdb_client import Point
+
+        point = Point("fronius_controls") \
+            .tag("device_id", device_id) \
+            .tag("device_type", "inverter")
+
+        if data.get('serial_number'):
+            point = point.tag("serial_number", data['serial_number'])
+
+        # Connection state
+        if 'connected' in ctrl:
+            point = point.field("connected", ctrl['connected'])
+
+        # Power limit
+        if ctrl.get('power_limit_pct') is not None:
+            point = point.field("power_limit_pct", float(ctrl['power_limit_pct']))
+        if 'power_limit_enabled' in ctrl:
+            point = point.field("power_limit_enabled", ctrl['power_limit_enabled'])
+
+        # Power factor
+        if ctrl.get('power_factor') is not None:
+            point = point.field("power_factor", float(ctrl['power_factor']))
+        if 'power_factor_enabled' in ctrl:
+            point = point.field("power_factor_enabled", ctrl['power_factor_enabled'])
+
+        # Reactive power (VAR)
+        if 'var_enabled' in ctrl:
+            point = point.field("var_enabled", ctrl['var_enabled'])
+        if ctrl.get('var_wmax_pct') is not None:
+            point = point.field("var_wmax_pct", float(ctrl['var_wmax_pct']))
+        if ctrl.get('var_max_pct') is not None:
+            point = point.field("var_max_pct", float(ctrl['var_max_pct']))
+
+        with self.lock:
+            self.write_api.write(bucket=self.config.bucket, record=point)
+        self.writes_total += 1
 
     def write_meter_data(self, device_id: str, data: Dict):
         """
