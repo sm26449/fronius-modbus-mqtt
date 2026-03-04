@@ -276,15 +276,6 @@ class DevicePoller(threading.Thread):
     STORAGE_LENGTH = 24      # Model 124 has 24 registers
     CONTROLS_POLL_INTERVAL = 60  # Read Model 123 every 60 seconds
 
-    # Model 103 fields known to return 0x0000 during DataManager buffer corruption
-    CORRUPT_ZERO_FIELDS = [
-        'ac_power', 'dc_power', 'dc_voltage', 'dc_current',
-        'ac_voltage_an', 'ac_voltage_bn', 'ac_voltage_cn',
-        'ac_current', 'ac_current_a', 'ac_current_b', 'ac_current_c',
-        'temp_cabinet', 'temp_heatsink', 'temp_transformer', 'temp_other',
-        'lifetime_energy'
-    ]
-
     def __init__(self, modbus_config: ModbusConfig, inverters: List[Dict],
                  meters: List[Dict], poll_delay: float, read_delay_ms: int,
                  parser: RegisterParser, publish_callback: Callable,
@@ -577,6 +568,8 @@ class DevicePoller(threading.Thread):
 
         if not corruption_detected:
             data['_corrupted'] = False
+            data['_corruption_reason'] = ''
+            data['_reconciled'] = False
             return data
 
         # --- Reconciliation ---
@@ -680,15 +673,6 @@ class DevicePoller(threading.Thread):
         data['status'] = self.parser.parse_status(data.get('status_code', 0))
         data['is_active'] = data.get('status_code', 0) in self.ACTIVE_STATUS_CODES
 
-        # Track status transitions
-        prev_status = self._last_status.get(unit_id)
-        curr_status = data.get('status_code')
-        self._last_status[unit_id] = curr_status
-        if self.debug_config.log_status_transitions and prev_status is not None and prev_status != curr_status:
-            prev_name = self.parser.parse_status(prev_status).get('name', '?')
-            curr_name = data.get('status', {}).get('name', '?')
-            self.log.warning(f"Inverter {unit_id}: {prev_name}({prev_status}) -> {curr_name}({curr_status})")
-
         # Parse events
         inverter_type = device_info.get('inverter_type', 'all')
         data['events'] = self.parser.parse_event_flags(
@@ -743,6 +727,15 @@ class DevicePoller(threading.Thread):
                     self.publish_callback(unit_id, 'storage', storage_data)
             else:
                 self.log.debug(f"Inverter {unit_id}: storage read failed")
+
+        # Track status transitions (after reconciliation, so we log the corrected status)
+        prev_status = self._last_status.get(unit_id)
+        curr_status = data.get('status_code')
+        self._last_status[unit_id] = curr_status
+        if self.debug_config.log_status_transitions and prev_status is not None and prev_status != curr_status:
+            prev_name = self.parser.parse_status(prev_status).get('name', '?')
+            curr_name = data.get('status', {}).get('name', '?')
+            self.log.warning(f"Inverter {unit_id}: {prev_name}({prev_status}) -> {curr_name}({curr_status})")
 
         # Cache last valid data for status recovery during corruption
         if not data.get('_corrupted'):
@@ -1181,9 +1174,9 @@ class FroniusModbusClient:
                  debug_config: DebugConfig = None):
         self.modbus_config = modbus_config
         self.devices_config = devices_config
-        self.parser = RegisterParser(register_map)
-        self.log = get_logger()
         self.debug_config = debug_config or DebugConfig()
+        self.parser = RegisterParser(register_map, debug_config=self.debug_config)
+        self.log = get_logger()
 
         # Discovery connection (separate from polling connections)
         self.connection = ModbusConnection(modbus_config, self.parser)

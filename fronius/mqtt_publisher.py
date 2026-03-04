@@ -738,9 +738,15 @@ class MQTTPublisher:
                 topic = self._build_topic(device_type, device_id, 'reconciled_fields')
                 self.publish_if_changed(topic, list(data.get('_reconciled_fields', {}).keys()))
         else:
-            # Clear corruption flag when data is clean
+            # Clear all corruption metadata when data is clean
             topic = self._build_topic(device_type, device_id, 'corrupted')
             self.publish_if_changed(topic, False)
+            topic = self._build_topic(device_type, device_id, 'corruption_reason')
+            self.publish_if_changed(topic, '')
+            topic = self._build_topic(device_type, device_id, 'reconciled')
+            self.publish_if_changed(topic, False)
+            topic = self._build_topic(device_type, device_id, 'reconciled_fields')
+            self.publish_if_changed(topic, [])
 
         # Controls data (Model 123 - Immediate Controls)
         if 'controls' in data and data['controls']:
