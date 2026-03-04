@@ -128,7 +128,8 @@ class FroniusModbusMQTT:
             self.config.modbus,
             self.config.devices,
             self.register_map,
-            publish_callback=self._publish_data
+            publish_callback=self._publish_data,
+            debug_config=self.config.debug
         )
 
         # Retry configuration
@@ -268,6 +269,8 @@ class FroniusModbusMQTT:
         self.log.info(f"Configured meters: {self.config.devices.meters}")
         self.log.info(f"Meter poll interval: {self.config.devices.meter_poll_interval}s")
         self.log.info(f"Inverter poll delay: {self.config.devices.inverter_poll_delay}s between each")
+        self.log.info(f"Data validation: {'enabled' if self.config.debug.validate_data else 'disabled'}")
+        self.log.info(f"Night inverter skip: {'enabled' if self.config.modbus.night_skip_inverters else 'disabled'}")
 
         # Initialize publishers FIRST (before modbus, so callback can use them)
         self._init_mqtt()

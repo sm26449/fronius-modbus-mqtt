@@ -72,6 +72,17 @@ def _validate_range(value, name: str, min_val=None, max_val=None):
 
 
 @dataclass
+class DebugConfig:
+    """Diagnostic and data validation settings for buffer corruption detection."""
+    validate_data: bool = True             # Enable buffer corruption detection + reconciliation
+    log_register_values: bool = False      # Log raw register hex values per read
+    log_scale_factors: bool = False        # Log scale factor calculations
+    log_reconciliation: bool = True        # Log corruption detection + reconciliation (WARNING level)
+    log_publish_data: bool = False         # Log full data dict before publish
+    log_status_transitions: bool = True    # Log inverter status changes (WARNING level)
+
+
+@dataclass
 class ModbusConfig:
     """Modbus TCP connection settings"""
     host: str
@@ -86,6 +97,7 @@ class ModbusConfig:
     night_end_hour: int = 6                  # Consider day after 06:00
     ping_check_enabled: bool = True          # Check host availability with ping
     consecutive_failures_for_sleep: int = 3  # Enter sleep mode after N failures
+    night_skip_inverters: bool = True        # Skip inverter polling at night (meters still polled)
 
     def __post_init__(self):
         _validate_range(self.port, "modbus.port", 1, 65535)
@@ -210,6 +222,7 @@ class ConfigLoader:
         self.devices: DevicesConfig = None
         self.mqtt: MQTTConfig = None
         self.influxdb: InfluxDBConfig = None
+        self.debug: DebugConfig = None
         self._load_config(config_path)
 
     @classmethod
@@ -287,7 +300,8 @@ class ConfigLoader:
             night_start_hour=_env_get('NIGHT_START_HOUR', mb.get('night_start_hour', 21), int),
             night_end_hour=_env_get('NIGHT_END_HOUR', mb.get('night_end_hour', 6), int),
             ping_check_enabled=_env_get('PING_CHECK_ENABLED', mb.get('ping_check_enabled', True), bool),
-            consecutive_failures_for_sleep=_env_get('CONSECUTIVE_FAILURES_FOR_SLEEP', mb.get('consecutive_failures_for_sleep', 3), int)
+            consecutive_failures_for_sleep=_env_get('CONSECUTIVE_FAILURES_FOR_SLEEP', mb.get('consecutive_failures_for_sleep', 3), int),
+            night_skip_inverters=_env_get('NIGHT_SKIP_INVERTERS', mb.get('night_skip_inverters', True), bool),
         )
 
         # Parse devices settings
@@ -332,6 +346,17 @@ class ConfigLoader:
             tls_certfile=_env_get('MQTT_TLS_CERTFILE', mq.get('tls_certfile', '')),
             tls_keyfile=_env_get('MQTT_TLS_KEYFILE', mq.get('tls_keyfile', '')),
             tls_insecure=_env_get('MQTT_TLS_INSECURE', mq.get('tls_insecure', False), bool),
+        )
+
+        # Parse debug settings
+        dbg = self.config.get('debug', {})
+        self.debug = DebugConfig(
+            validate_data=_env_get('DEBUG_VALIDATE_DATA', dbg.get('validate_data', True), bool),
+            log_register_values=_env_get('DEBUG_LOG_REGISTERS', dbg.get('log_register_values', False), bool),
+            log_scale_factors=_env_get('DEBUG_LOG_SCALE_FACTORS', dbg.get('log_scale_factors', False), bool),
+            log_reconciliation=_env_get('DEBUG_LOG_RECONCILIATION', dbg.get('log_reconciliation', True), bool),
+            log_publish_data=_env_get('DEBUG_LOG_PUBLISH_DATA', dbg.get('log_publish_data', False), bool),
+            log_status_transitions=_env_get('DEBUG_LOG_STATUS_TRANSITIONS', dbg.get('log_status_transitions', True), bool),
         )
 
         # Parse InfluxDB settings

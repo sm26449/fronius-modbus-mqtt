@@ -23,6 +23,8 @@ modbus:
   night_end_hour: 6            # Night ends at 06:00
   ping_check_enabled: true     # Check if host responds to ping before connecting
   consecutive_failures_for_sleep: 3  # Enter sleep mode after N consecutive failures
+  night_skip_inverters: true   # Skip inverter polling at night (meters still polled)
+                               # DataManager returns stale/corrupted data from sleeping inverters
 
 # Device Configuration
 # --------------------
@@ -31,7 +33,7 @@ devices:
   inverters: [1]               # Inverter Modbus IDs (typically 1-4)
   meters: [240]                # Smart Meter Modbus ID (typically 240)
   meter_poll_interval: 2       # (unused - kept for compatibility)
-  inverter_poll_delay: 2       # Delay between device reads in seconds
+  inverter_poll_delay: 3       # Delay between device reads in seconds (3s reduces DataManager pressure)
   inverter_read_delay_ms: 500  # Delay between register block reads within same inverter (500ms)
 
 # MQTT Configuration
@@ -65,3 +67,17 @@ influxdb:
   # TLS settings (optional - requires InfluxDB configured with TLS)
   # verify_ssl: true           # Verify SSL certificates
   # ssl_ca_cert: ""            # Path to CA certificate file
+
+# Debug & Data Validation
+# -----------------------
+# DataManager buffer corruption detection and diagnostic logging.
+# The Fronius DataManager TCP server has a known buffer retention issue where
+# Model 103 registers return stale/zero data while MPPT Model 160 data remains correct.
+# When enabled, corrupted reads are detected and reconciled using MPPT as ground truth.
+debug:
+  validate_data: true          # Enable buffer corruption detection + reconciliation (recommended)
+  log_register_values: false   # Log raw register hex values per read (very verbose)
+  log_scale_factors: false     # Log scale factor calculations (very verbose)
+  log_reconciliation: true     # Log corruption detection + reconciliation (WARNING level)
+  log_publish_data: false      # Log full data dict before publish (very verbose)
+  log_status_transitions: true # Log inverter status changes, e.g. MPPT→FAULT (WARNING level)

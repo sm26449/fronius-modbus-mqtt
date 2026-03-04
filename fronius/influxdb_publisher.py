@@ -319,6 +319,12 @@ class InfluxDBPublisher:
             if 'status' in data:
                 point = point.tag("status", data['status'].get('name', 'UNKNOWN'))
 
+            # Tag corrupted/reconciled data for Flux filtering
+            if data.get('_corrupted'):
+                point = point.tag("corrupted", "true")
+            if data.get('_reconciled'):
+                point = point.tag("reconciled", "true")
+
             # Numeric fields
             numeric_fields = [
                 'ac_power', 'ac_current', 'ac_current_a', 'ac_current_b', 'ac_current_c',

@@ -726,6 +726,22 @@ class MQTTPublisher:
                         topic = self._build_topic(device_type, device_id, f'{base}/Tmp')
                         self.publish_if_changed(topic, module['temperature'])
 
+        # Corruption metadata (DataManager buffer corruption detection)
+        if data.get('_corrupted'):
+            topic = self._build_topic(device_type, device_id, 'corrupted')
+            self.publish_if_changed(topic, True)
+            topic = self._build_topic(device_type, device_id, 'corruption_reason')
+            self.publish_if_changed(topic, data.get('_corruption_reason', ''))
+            if data.get('_reconciled'):
+                topic = self._build_topic(device_type, device_id, 'reconciled')
+                self.publish_if_changed(topic, True)
+                topic = self._build_topic(device_type, device_id, 'reconciled_fields')
+                self.publish_if_changed(topic, list(data.get('_reconciled_fields', {}).keys()))
+        else:
+            # Clear corruption flag when data is clean
+            topic = self._build_topic(device_type, device_id, 'corrupted')
+            self.publish_if_changed(topic, False)
+
         # Controls data (Model 123 - Immediate Controls)
         if 'controls' in data and data['controls']:
             ctrl = data['controls']

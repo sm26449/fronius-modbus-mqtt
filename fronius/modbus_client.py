@@ -18,7 +18,7 @@ from typing import Dict, List, Optional, Callable
 from pymodbus.client import ModbusTcpClient
 from pymodbus.exceptions import ModbusException
 
-from .config import ModbusConfig, DevicesConfig
+from .config import ModbusConfig, DevicesConfig, DebugConfig
 from .register_parser import RegisterParser
 from .logging_setup import get_logger
 
@@ -276,9 +276,19 @@ class DevicePoller(threading.Thread):
     STORAGE_LENGTH = 24      # Model 124 has 24 registers
     CONTROLS_POLL_INTERVAL = 60  # Read Model 123 every 60 seconds
 
+    # Model 103 fields known to return 0x0000 during DataManager buffer corruption
+    CORRUPT_ZERO_FIELDS = [
+        'ac_power', 'dc_power', 'dc_voltage', 'dc_current',
+        'ac_voltage_an', 'ac_voltage_bn', 'ac_voltage_cn',
+        'ac_current', 'ac_current_a', 'ac_current_b', 'ac_current_c',
+        'temp_cabinet', 'temp_heatsink', 'temp_transformer', 'temp_other',
+        'lifetime_energy'
+    ]
+
     def __init__(self, modbus_config: ModbusConfig, inverters: List[Dict],
                  meters: List[Dict], poll_delay: float, read_delay_ms: int,
-                 parser: RegisterParser, publish_callback: Callable):
+                 parser: RegisterParser, publish_callback: Callable,
+                 debug_config: DebugConfig = None):
         super().__init__(daemon=True, name="DevicePoller")
         self.modbus_config = modbus_config
         self.inverters = inverters
@@ -290,6 +300,7 @@ class DevicePoller(threading.Thread):
         self.log = get_logger()
         self.running = False
         self._stop_event = threading.Event()
+        self.debug_config = debug_config or DebugConfig()
 
         # Single connection for all devices
         self.connection = ModbusConnection(modbus_config, parser)
@@ -308,6 +319,12 @@ class DevicePoller(threading.Thread):
         self._in_sleep_mode = False
         self._last_successful_poll = time.time()
         self._sleep_mode_start = None
+
+        # Data validation state (for buffer corruption detection)
+        self._last_valid_data: Dict[int, Dict] = {}   # {unit_id: last non-corrupted data}
+        self._corruption_count: Dict[int, int] = {}     # {unit_id: corruption count}
+        self._last_status: Dict[int, int] = {}           # {unit_id: last status_code}
+        self._night_skip_logged = False                  # Log night skip message once
 
     def _runtime_key(self, device_id: int, device_type: str) -> str:
         """Generate unique key for device runtime tracking."""
@@ -508,6 +525,118 @@ class DevicePoller(threading.Thread):
             'devices': devices,
         }
 
+    def _validate_and_reconcile(self, data: dict, unit_id: int) -> dict:
+        """Detect DataManager buffer corruption and reconcile using MPPT data.
+
+        The Fronius DataManager TCP server has a known buffer retention issue where
+        Model 103 registers return stale/zero data, while MPPT Model 160 data
+        (read after a fresh connection reset) remains correct.
+
+        Detection strategies:
+        1. Model 103 all-zero but MPPT shows production
+        2. Impossible status_code for time of day (MPPT/STARTING at night)
+        3. FAULT status but MPPT strings producing power
+
+        Reconciliation:
+        - DC power/voltage/current → MPPT sums (ground truth)
+        - AC power → DC × 0.97 estimate (better than 0)
+        - AC voltage, temps, lifetime_energy → None (skip publish)
+        - Status code → restore from last valid or set SLEEPING for night
+        """
+        mppt = data.get('mppt', {})
+        modules = mppt.get('modules', [])
+        mppt_dc_power = sum(m.get('dc_power', 0) or 0 for m in modules)
+        mppt_dc_current = sum(m.get('dc_current', 0) or 0 for m in modules)
+        mppt_dc_voltage = max((m.get('dc_voltage', 0) or 0 for m in modules), default=0)
+
+        status_code = data.get('status_code', 0)
+        corruption_detected = False
+        reason = ''
+
+        # Strategy 1: MPPT shows production but Model 103 shows all zeros
+        model103_all_zero = (
+            (data.get('ac_power') is not None and data['ac_power'] == 0) and
+            (data.get('dc_power') is not None and data['dc_power'] == 0) and
+            (data.get('dc_voltage') is not None and data['dc_voltage'] == 0)
+        )
+        if model103_all_zero and mppt_dc_power > 100:
+            corruption_detected = True
+            reason = f'Model103 all-zero but MPPT={mppt_dc_power:.0f}W'
+
+        # Strategy 2: impossible status_code for time of day
+        hour = datetime.now().hour
+        is_night = hour >= 22 or hour < 5
+        if is_night and status_code in (3, 4, 5):  # STARTING, MPPT, THROTTLED
+            corruption_detected = True
+            reason = f'impossible status {status_code} at night ({hour:02d}:xx)'
+
+        # Strategy 3: FAULT (7) but MPPT strings producing
+        if status_code == 7 and mppt_dc_power > 100:
+            corruption_detected = True
+            reason = f'FAULT but MPPT producing {mppt_dc_power:.0f}W'
+
+        if not corruption_detected:
+            data['_corrupted'] = False
+            return data
+
+        # --- Reconciliation ---
+        prev = self._last_valid_data.get(unit_id, {})
+        reconciled = {}
+
+        # DC side: use MPPT as ground truth (always correct after connection reset)
+        if mppt_dc_power > 0:
+            if data.get('dc_power', 0) == 0:
+                data['dc_power'] = mppt_dc_power
+                reconciled['dc_power'] = mppt_dc_power
+            if data.get('dc_voltage', 0) == 0:
+                data['dc_voltage'] = mppt_dc_voltage
+                reconciled['dc_voltage'] = mppt_dc_voltage
+            if data.get('dc_current', 0) == 0:
+                data['dc_current'] = mppt_dc_current
+                reconciled['dc_current'] = mppt_dc_current
+            # Estimate ac_power from DC (better than 0 for PV aggregation)
+            if data.get('ac_power', 0) == 0:
+                data['ac_power'] = round(mppt_dc_power * 0.97, 1)
+                reconciled['ac_power'] = data['ac_power']
+
+        # Unreliable fields: null out (can't derive from MPPT)
+        # None values won't be published by MQTT/InfluxDB (already filtered)
+        for field in ['ac_voltage_an', 'ac_voltage_bn', 'ac_voltage_cn',
+                      'ac_current', 'ac_current_a', 'ac_current_b', 'ac_current_c',
+                      'temp_cabinet', 'temp_heatsink', 'temp_transformer', 'temp_other',
+                      'lifetime_energy']:
+            if data.get(field) is not None and data[field] == 0:
+                data[field] = None
+                reconciled[field] = None
+
+        # Fix status_code from last known valid read
+        if status_code == 7 and prev.get('status_code') in (4, 5):
+            data['status_code'] = prev['status_code']
+            data['status'] = self.parser.parse_status(prev['status_code'])
+            reconciled['status_code'] = prev['status_code']
+        elif is_night and status_code not in (0, 1, 2):
+            data['status_code'] = 2  # SLEEPING (most likely at night)
+            data['status'] = self.parser.parse_status(2)
+            reconciled['status_code'] = 2
+
+        # Tag data for downstream consumers (InfluxDB tags, MQTT metadata)
+        data['_corrupted'] = True
+        data['_corruption_reason'] = reason
+        data['_reconciled'] = bool(reconciled)
+        data['_reconciled_fields'] = reconciled
+
+        # Track corruption stats
+        self._corruption_count[unit_id] = self._corruption_count.get(unit_id, 0) + 1
+
+        if self.debug_config.log_reconciliation:
+            self.log.warning(
+                f"Inverter {unit_id}: buffer corruption detected ({reason}), "
+                f"reconciled {len(reconciled)} fields, "
+                f"total corruptions: {self._corruption_count[unit_id]}"
+            )
+
+        return data
+
     def _poll_inverter(self, device_info: Dict, max_retries: int = 3) -> bool:
         """Poll a single inverter with retry on failure."""
         unit_id = device_info['device_id']
@@ -551,6 +680,15 @@ class DevicePoller(threading.Thread):
         data['status'] = self.parser.parse_status(data.get('status_code', 0))
         data['is_active'] = data.get('status_code', 0) in self.ACTIVE_STATUS_CODES
 
+        # Track status transitions
+        prev_status = self._last_status.get(unit_id)
+        curr_status = data.get('status_code')
+        self._last_status[unit_id] = curr_status
+        if self.debug_config.log_status_transitions and prev_status is not None and prev_status != curr_status:
+            prev_name = self.parser.parse_status(prev_status).get('name', '?')
+            curr_name = data.get('status', {}).get('name', '?')
+            self.log.warning(f"Inverter {unit_id}: {prev_name}({prev_status}) -> {curr_name}({curr_status})")
+
         # Parse events
         inverter_type = device_info.get('inverter_type', 'all')
         data['events'] = self.parser.parse_event_flags(
@@ -573,6 +711,10 @@ class DevicePoller(threading.Thread):
                                f"V={mod.get('dc_voltage', 0):.1f}V, "
                                f"I={mod.get('dc_current', 0):.2f}A, "
                                f"P={mod.get('dc_power', 0):.0f}W")
+
+        # Validate and reconcile data against MPPT ground truth
+        if self.debug_config.validate_data:
+            data = self._validate_and_reconcile(data, unit_id)
 
         # Read Model 123 - Immediate Controls (power limit, PF, connection status)
         # Only read every CONTROLS_POLL_INTERVAL seconds (controls don't change often)
@@ -601,6 +743,14 @@ class DevicePoller(threading.Thread):
                     self.publish_callback(unit_id, 'storage', storage_data)
             else:
                 self.log.debug(f"Inverter {unit_id}: storage read failed")
+
+        # Cache last valid data for status recovery during corruption
+        if not data.get('_corrupted'):
+            self._last_valid_data[unit_id] = {
+                'status_code': data.get('status_code'),
+                'ac_power': data.get('ac_power'),
+                'ac_voltage_an': data.get('ac_voltage_an'),
+            }
 
         # Publish to MQTT
         self.publish_callback(unit_id, 'inverter', data)
@@ -965,16 +1115,28 @@ class DevicePoller(threading.Thread):
             # Poll all devices
             poll_success = False
 
-            # Poll all inverters
-            for device_info in self.inverters:
-                if not self.running:
-                    break
-                if self._poll_inverter(device_info):
-                    poll_success = True
-                if self._stop_event.wait(self.poll_delay):
-                    break
+            # Skip inverter polling at night (DataManager returns garbage from sleeping inverters)
+            skip_inverters = self._is_night_time() and self.modbus_config.night_skip_inverters
+            if skip_inverters:
+                if not self._night_skip_logged:
+                    self.log.info("DevicePoller: Skipping inverter polling (night mode — DataManager returns stale data)")
+                    self._night_skip_logged = True
+            else:
+                if self._night_skip_logged:
+                    self.log.info("DevicePoller: Resuming inverter polling (dawn detected)")
+                    self._night_skip_logged = False
 
-            # Poll all meters
+            # Poll all inverters (unless night skip)
+            if not skip_inverters:
+                for device_info in self.inverters:
+                    if not self.running:
+                        break
+                    if self._poll_inverter(device_info):
+                        poll_success = True
+                    if self._stop_event.wait(self.poll_delay):
+                        break
+
+            # Poll all meters (always — meter data is valid at night)
             for device_info in self.meters:
                 if not self.running:
                     break
@@ -1015,11 +1177,13 @@ class FroniusModbusClient:
     """Main Modbus client managing connection and pollers."""
 
     def __init__(self, modbus_config: ModbusConfig, devices_config: DevicesConfig,
-                 register_map: Dict, publish_callback: Callable = None):
+                 register_map: Dict, publish_callback: Callable = None,
+                 debug_config: DebugConfig = None):
         self.modbus_config = modbus_config
         self.devices_config = devices_config
         self.parser = RegisterParser(register_map)
         self.log = get_logger()
+        self.debug_config = debug_config or DebugConfig()
 
         # Discovery connection (separate from polling connections)
         self.connection = ModbusConnection(modbus_config, self.parser)
@@ -1098,7 +1262,8 @@ class FroniusModbusClient:
                 poll_delay=self.devices_config.inverter_poll_delay,
                 read_delay_ms=self.devices_config.inverter_read_delay_ms,
                 parser=self.parser,
-                publish_callback=self.publish_callback
+                publish_callback=self.publish_callback,
+                debug_config=self.debug_config
             )
             self.device_poller.start()
             self.log.info("Started single DevicePoller thread for all devices")

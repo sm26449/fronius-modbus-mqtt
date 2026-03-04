@@ -24,15 +24,17 @@ class RegisterParser:
     NOT_IMPLEMENTED_UINT32 = 0xFFFFFFFF
     NOT_IMPLEMENTED_INT32 = 0x80000000
 
-    def __init__(self, register_map: Dict):
+    def __init__(self, register_map: Dict, debug_config=None):
         """
         Initialize parser with register map.
 
         Args:
             register_map: Register definitions loaded from registers.json
+            debug_config: Optional DebugConfig for diagnostic logging
         """
         self.register_map = register_map
         self.log = get_logger()
+        self.debug_config = debug_config
         self.event_flags = self._load_event_flags()
         self.status_codes = register_map.get('status_codes', {})
         self.state_codes = register_map.get('state_codes', {})
@@ -167,9 +169,14 @@ class RegisterParser:
             return None
         # Validate scale factor range (typically -10 to +10)
         if scale_factor < -10 or scale_factor > 10:
+            if self.debug_config and self.debug_config.log_scale_factors:
+                self.log.debug(f"Scale factor out of range: value={value}, sf={scale_factor}")
             return None
         try:
-            return float(value) * (10 ** scale_factor)
+            result = float(value) * (10 ** scale_factor)
+            if self.debug_config and self.debug_config.log_scale_factors:
+                self.log.debug(f"Scale: {value} × 10^{scale_factor} = {result}")
+            return result
         except (OverflowError, ValueError):
             return None
 
