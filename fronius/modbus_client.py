@@ -638,6 +638,11 @@ class DevicePoller(threading.Thread):
         if self._is_device_in_backoff(device_info, 'inverter'):
             return False
 
+        # Force connection reset before reading to ensure fresh DataManager buffer
+        # Both Model 103 and MPPT Model 160 are then read on the same clean connection
+        self.connection.connected = False
+        time.sleep(0.3)
+
         # Read main registers (40072-40120) with retry
         regs = None
         for attempt in range(max_retries):
@@ -683,10 +688,7 @@ class DevicePoller(threading.Thread):
             inverter_type
         )
 
-        # Read MPPT Model 160 in single optimized query
-        # Force connection reset to clear DataManager buffer after main registers
-        self.connection.connected = False
-        time.sleep(0.3)
+        # Read MPPT Model 160 on the same fresh connection (no reset needed)
         mppt_data = self._read_mppt_data(unit_id)
         if mppt_data and mppt_data.get('modules'):
             data['mppt'] = mppt_data
