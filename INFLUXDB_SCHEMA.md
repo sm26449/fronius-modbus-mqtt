@@ -11,7 +11,7 @@ Complete schema for the Fronius Modbus MQTT InfluxDB integration.
 
 ## Measurement: `fronius_inverter`
 
-Data from Fronius inverters (SunSpec Models 101-103, 123, 160).
+Data from Fronius inverters (SunSpec Models 101-103, 160).
 
 ### Tags
 
@@ -130,6 +130,48 @@ Typical configurations:
 | 2 | Fronius Symo Advanced 20.0-3-M | 20 kW | 34439632 |
 | 3 | Fronius Symo Advanced 17.5-3-M | 17.5 kW | 34312229 |
 | 4 | Fronius Symo 17.5-3-M | 17.5 kW | 31459301 |
+
+---
+
+## Measurement: `fronius_controls`
+
+Inverter immediate controls data (SunSpec Model 123). Polled every 60s, written only on value change.
+
+### Tags
+
+| Tag | Type | Description | Example |
+|-----|------|-------------|---------|
+| `device_id` | string | Modbus unit ID | `1`, `2`, `3`, `4` |
+| `device_type` | string | Always `inverter` | `inverter` |
+| `serial_number` | string | Device serial number | `34559971` |
+
+### Fields - Connection
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `connected` | bool | Grid connection state |
+
+### Fields - Power Limit
+
+| Field | Type | Unit | Description |
+|-------|------|------|-------------|
+| `power_limit_pct` | float | % | Active power output limit (100 = no limit) |
+| `power_limit_enabled` | bool | - | Power limit control enabled |
+
+### Fields - Power Factor
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `power_factor` | float | Power factor setpoint (-1.0 to 1.0) |
+| `power_factor_enabled` | bool | Power factor control enabled |
+
+### Fields - Reactive Power (VAR)
+
+| Field | Type | Unit | Description |
+|-------|------|------|-------------|
+| `var_enabled` | bool | - | Reactive power control enabled |
+| `var_wmax_pct` | float | % | Reactive power as % of WMax |
+| `var_max_pct` | float | % | Reactive power as % of VArMax |
 
 ---
 
@@ -318,6 +360,15 @@ from(bucket: "fronius")
   |> filter(fn: (r) => r._measurement == "fronius_meter")
   |> filter(fn: (r) => r._field == "voltage_an" or r._field == "voltage_bn" or r._field == "voltage_cn")
   |> aggregateWindow(every: 1m, fn: mean)
+```
+
+### Inverter controls status
+```flux
+from(bucket: "fronius")
+  |> range(start: -7d)
+  |> filter(fn: (r) => r._measurement == "fronius_controls")
+  |> filter(fn: (r) => r._field == "power_limit_pct" or r._field == "connected")
+  |> group(columns: ["device_id", "_field"])
 ```
 
 ### Inverter status timeline

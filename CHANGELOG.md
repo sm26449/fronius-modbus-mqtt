@@ -5,6 +5,51 @@ All notable changes to Fronius Modbus MQTT will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.0] - 2026-03-05
+
+### Added
+- **DataManager Buffer Corruption Detection & Reconciliation**
+  - Fronius DataManager TCP server has a known buffer retention issue where Model 103 registers
+    return stale/zero data while MPPT Model 160 data remains correct
+  - Three detection strategies: Model 103 all-zero with MPPT producing, impossible status at night,
+    FAULT status while MPPT strings are producing
+  - Automatic reconciliation: DC power/voltage/current from MPPT sums (ground truth),
+    AC power estimated as DC × 0.97, unreliable fields (voltages, temps) set to None
+  - Status code recovery from last valid read or set to SLEEPING at night
+  - Per-inverter corruption counters for monitoring
+  - Corrupted reads tagged in InfluxDB (`corrupted=true`, `reconciled=true`) for Flux filtering
+  - Corruption metadata published to MQTT (`corrupted`, `corruption_reason`, `reconciled`, `reconciled_fields`)
+- **Night Inverter Skip**
+  - Time-based inverter polling skip during night hours (configurable, default 21:00–06:00)
+  - DataManager stays online at night but returns garbage data because inverters cycle sleep/wake
+  - Meters continue to be polled (grid import/export data is always valid)
+  - Configurable via `modbus.night_skip_inverters` (default: `true`)
+  - Logged: "Skipping inverter polling (night mode)" / "Resuming inverter polling (dawn detected)"
+- **Configurable Diagnostic Debug System**
+  - New `debug:` YAML config section with 6 options (all with safe defaults)
+  - `validate_data` — enable/disable buffer corruption detection (default: true)
+  - `log_register_values` — log raw register hex values per read (default: false)
+  - `log_scale_factors` — log scale factor calculations (default: false)
+  - `log_reconciliation` — log corruption detection + reconciliation at WARNING level (default: true)
+  - `log_publish_data` — log full data dict before publish (default: false)
+  - `log_status_transitions` — log inverter status changes, e.g. MPPT→FAULT (default: true)
+  - Environment variable overrides: `DEBUG_VALIDATE_DATA`, `DEBUG_LOG_RECONCILIATION`, etc.
+- **Status Transition Tracking**
+  - Per-inverter status change logging at WARNING level (after reconciliation, so corrected status is logged)
+  - Example: `Inverter 1: MPPT(4) -> FAULT(7)` or `Inverter 2: STARTING(3) -> MPPT(4)`
+
+### Changed
+- **Optimized Modbus Read Sequence**
+  - TCP connection reset moved from between Model 103 and MPPT reads to before Model 103
+  - Both register types now read on the same fresh connection per device
+  - Halves the number of TCP connections per polling cycle (4 instead of 8 for 4 inverters)
+  - Before: `[stale conn] → Model 103 (risk of corruption) → CLOSE+0.3s → MPPT (fresh)`
+  - After: `CLOSE+0.3s → Model 103 (fresh) → MPPT (same fresh conn)`
+- **Recommended Polling Configuration**
+  - `poll_interval` default increased from 5s to 10s (aligns with DataManager's 10s SolarNet refresh)
+  - `inverter_poll_delay` reduced from 3s to 1s (faster cycle, less DataManager pressure overall)
+  - Full cycle: 4 inverters × 1s = 4s, then 6s idle before next cycle
+
 ## [1.4.1] - 2026-02-26
 
 ### Added
@@ -403,6 +448,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 | Version | Date | Highlights |
 |---------|------|------------|
+| 1.5.0 | 2026-03-05 | Buffer corruption detection, night inverter skip, diagnostic debug system |
 | 1.4.1 | 2026-02-26 | Storage InfluxDB, MPPT temp, thread safety, HA discovery expansion |
 | 1.4.0 | 2026-02-26 | Resilient reconnection, data loss prevention, graceful shutdown |
 | 1.3.1 | 2026-02-26 | InfluxDB events_json field for fault event persistence |

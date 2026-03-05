@@ -1,6 +1,6 @@
 # Fronius Modbus MQTT
 
-[![Version](https://img.shields.io/badge/version-1.4.1-blue.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-1.5.0-blue.svg)](CHANGELOG.md)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
 Python application that reads data from Fronius inverters and smart meters via Modbus TCP and publishes to MQTT and/or InfluxDB.
@@ -14,8 +14,11 @@ Python application that reads data from Fronius inverters and smart meters via M
 - **MPPT Data** - Per-string voltage, current, and power (Model 160)
 - **Immediate Controls** - Read inverter control settings (Model 123)
 - **Event Parsing** - Decode Fronius event flags with human-readable descriptions
+- **Data Validation** - Automatic detection and reconciliation of DataManager buffer corruption using MPPT as ground truth
 - **Night Mode** - Automatic sleep detection when inverters go offline at night
+- **Night Inverter Skip** - Skip inverter polling during night hours (DataManager returns stale data from sleeping inverters)
 - **Connection Resilience** - Persistent reconnection monitoring, proactive health checks, data loss prevention
+- **Diagnostic Debug System** - Configurable logging for register values, scale factors, status transitions, and corruption events
 - **Security Hardened** - Non-root container, optional TLS/SSL, secret masking in logs
 - **Publish Modes** - Publish on change or publish all values
 - **Docker Support** - Separate containers for inverters and meters
@@ -132,6 +135,7 @@ modbus:
   timeout: 3                   # Connection timeout (seconds)
   retry_attempts: 3            # Retries on failure
   retry_delay: 0.5             # Delay between retries (seconds)
+  night_skip_inverters: true   # Skip inverter polling at night (meters still polled)
 ```
 
 ### Device Settings
@@ -140,7 +144,7 @@ modbus:
 devices:
   inverters: [1, 2, 3, 4]      # Inverter Modbus IDs
   meters: [240]                # Meter Modbus ID
-  inverter_poll_delay: 2       # Delay between device reads (seconds)
+  inverter_poll_delay: 1       # Delay between device reads (seconds)
   inverter_read_delay_ms: 500  # Delay between register blocks (ms)
 ```
 
@@ -184,6 +188,18 @@ influxdb:
   publish_mode: changed        # 'changed' or 'all'
 ```
 
+### Debug & Data Validation
+
+```yaml
+debug:
+  validate_data: true          # Enable buffer corruption detection + reconciliation
+  log_register_values: false   # Log raw register hex values per read
+  log_scale_factors: false     # Log scale factor calculations
+  log_reconciliation: true     # Log corruption detection + reconciliation
+  log_publish_data: false      # Log full data dict before publish
+  log_status_transitions: true # Log inverter status changes (e.g. MPPT→FAULT)
+```
+
 **InfluxDB Setup:**
 1. Create an API token with read/write permissions for buckets
 2. Copy the token to your configuration
@@ -220,6 +236,13 @@ Configuration can also be set via environment variables (useful for Docker):
 | `NIGHT_END_HOUR` | Night end hour (24h) | `6` |
 | `PING_CHECK_ENABLED` | Ping host before connect | `true` |
 | `CONSECUTIVE_FAILURES_FOR_SLEEP` | Failures before sleep mode | `3` |
+| `NIGHT_SKIP_INVERTERS` | Skip inverter polling at night | `true` |
+| **Debug** | | |
+| `DEBUG_VALIDATE_DATA` | Enable buffer corruption detection | `true` |
+| `DEBUG_LOG_RECONCILIATION` | Log corruption reconciliation | `true` |
+| `DEBUG_LOG_STATUS_TRANSITIONS` | Log inverter status changes | `true` |
+| `DEBUG_LOG_REGISTER_VALUES` | Log raw register hex values | `false` |
+| `DEBUG_LOG_SCALE_FACTORS` | Log scale factor calculations | `false` |
 | **MQTT** | | |
 | `MQTT_ENABLED` | Enable MQTT publishing | `true` |
 | `MQTT_BROKER` | MQTT broker address | `localhost` |
