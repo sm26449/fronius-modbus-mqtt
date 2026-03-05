@@ -1,5 +1,6 @@
 """MQTT Publisher with change detection and topic management"""
 
+import math
 import time
 import json
 import threading
@@ -364,13 +365,22 @@ class MQTTPublisher:
         self.client.reconnect_delay_set(min_delay=1, max_delay=60)
 
     def _on_connect(self, client, userdata, flags, reason_code, properties=None):
-        """Handle connection established"""
+        """Handle connection established — re-publish online status and clear cache."""
         if reason_code == 0:
             self.connected = True
             self.connection_count += 1
             self.log.info(
                 f"MQTT connected to {self.config.broker}:{self.config.port}"
             )
+            # Re-publish online status (broker restart loses retained messages)
+            status_topic = f"{self.config.topic_prefix}/status"
+            try:
+                self.client.publish(status_topic, "online", qos=1, retain=True)
+            except Exception:
+                pass
+            # Clear last_values cache to force re-publish of all current values
+            with self.lock:
+                self.last_values.clear()
         else:
             self.connected = False
             self.log.error(f"MQTT connection failed: {reason_code}")
@@ -503,8 +513,9 @@ class MQTTPublisher:
             self._reconnect_thread.join(timeout=2)
 
         if self.client:
-            self.client.loop_stop()
+            # disconnect() first, then loop_stop() per paho-mqtt docs
             self.client.disconnect()
+            self.client.loop_stop()
         self.connected = False
         self.log.info("MQTT disconnected")
 
@@ -529,6 +540,7 @@ class MQTTPublisher:
     def _should_publish(self, topic: str, value: Any) -> bool:
         """
         Check if value should be published based on mode.
+        Does NOT update cache — cache is updated after successful publish.
 
         Args:
             topic: MQTT topic
@@ -540,16 +552,23 @@ class MQTTPublisher:
         if self.publish_mode == 'all':
             return True
 
+        # NaN guard: NaN != NaN is always True, would bypass change detection
+        if isinstance(value, float) and math.isnan(value):
+            return False
+
         with self.lock:
             if topic not in self.last_values:
-                self.last_values[topic] = value
                 return True
 
             if self.last_values[topic] != value:
-                self.last_values[topic] = value
                 return True
 
             return False
+
+    def _confirm_publish(self, topic: str, value: Any):
+        """Update cache after successful publish."""
+        with self.lock:
+            self.last_values[topic] = value
 
     def _publish(self, topic: str, payload: str, retain: bool = None) -> bool:
         """
@@ -627,6 +646,7 @@ class MQTTPublisher:
                            retain: bool = None) -> bool:
         """
         Publish only if value changed (based on publish_mode).
+        Cache updated only after successful publish to prevent data loss.
 
         Args:
             topic: MQTT topic
@@ -637,7 +657,10 @@ class MQTTPublisher:
             True if published, False if skipped or failed
         """
         if self._should_publish(topic, value):
-            return self.publish(topic, value, retain)
+            result = self.publish(topic, value, retain)
+            if result:
+                self._confirm_publish(topic, value)
+            return result
 
         self.messages_skipped += 1
         return False
@@ -655,6 +678,13 @@ class MQTTPublisher:
         if not self.client:
             return
 
+        try:
+            self._publish_inverter_data_inner(device_id, data)
+        except Exception as e:
+            self.log.error(f"Error publishing inverter {device_id} data: {e}")
+
+    def _publish_inverter_data_inner(self, device_id: str, data: Dict):
+        """Inner implementation of publish_inverter_data."""
         device_type = 'inverter'
 
         # Publish measurement fields with SunSpec names
@@ -792,6 +822,13 @@ class MQTTPublisher:
         if not self.client:
             return
 
+        try:
+            self._publish_meter_data_inner(device_id, data)
+        except Exception as e:
+            self.log.error(f"Error publishing meter {device_id} data: {e}")
+
+    def _publish_meter_data_inner(self, device_id: str, data: Dict):
+        """Inner implementation of publish_meter_data."""
         device_type = 'meter'
 
         # Publish measurement fields with SunSpec names
@@ -819,6 +856,13 @@ class MQTTPublisher:
         if not self.client:
             return
 
+        try:
+            self._publish_storage_data_inner(device_id, data)
+        except Exception as e:
+            self.log.error(f"Error publishing storage {device_id} data: {e}")
+
+    def _publish_storage_data_inner(self, device_id: str, data: Dict):
+        """Inner implementation of publish_storage_data."""
         device_type = 'storage'
 
         # Publish measurement fields with SunSpec names

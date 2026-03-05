@@ -105,22 +105,35 @@ class FroniusModbusMQTT:
         self.running = False
 
     def _publish_data(self, device_id: int, device_type: str, data: dict):
-        """Callback for polling threads to publish data"""
+        """Callback for polling threads to publish data.
+
+        Exceptions are caught per-publisher so one failing publisher
+        doesn't block the other.
+        """
         if device_type == 'inverter':
             if self.mqtt_publisher:
                 self.mqtt_publisher.publish_inverter_data(str(device_id), data)
             if self.influxdb_publisher:
-                self.influxdb_publisher.write_inverter_data(str(device_id), data)
+                try:
+                    self.influxdb_publisher.write_inverter_data(str(device_id), data)
+                except Exception as e:
+                    self.log.error(f"InfluxDB write error for inverter {device_id}: {e}")
         elif device_type == 'meter':
             if self.mqtt_publisher:
                 self.mqtt_publisher.publish_meter_data(str(device_id), data)
             if self.influxdb_publisher:
-                self.influxdb_publisher.write_meter_data(str(device_id), data)
+                try:
+                    self.influxdb_publisher.write_meter_data(str(device_id), data)
+                except Exception as e:
+                    self.log.error(f"InfluxDB write error for meter {device_id}: {e}")
         elif device_type == 'storage':
             if self.mqtt_publisher:
                 self.mqtt_publisher.publish_storage_data(str(device_id), data)
             if self.influxdb_publisher:
-                self.influxdb_publisher.write_storage_data(str(device_id), data)
+                try:
+                    self.influxdb_publisher.write_storage_data(str(device_id), data)
+                except Exception as e:
+                    self.log.error(f"InfluxDB write error for storage {device_id}: {e}")
 
     def _init_modbus(self) -> bool:
         """Initialize Modbus client and connect with retry logic"""
@@ -272,8 +285,13 @@ class FroniusModbusMQTT:
         self.log.info(f"Data validation: {'enabled' if self.config.debug.validate_data else 'disabled'}")
         self.log.info(f"Night inverter skip: {'enabled' if self.config.modbus.night_skip_inverters else 'disabled'}")
 
+        # Clean stale health file from previous run
+        self._cleanup_health_file()
+
         # Initialize publishers FIRST (before modbus, so callback can use them)
-        self._init_mqtt()
+        if not self._init_mqtt():
+            self.log.error("MQTT initialization failed, exiting")
+            sys.exit(1)
         self._init_influxdb()
 
         # Initialize Modbus (with publish callback)
@@ -367,6 +385,14 @@ class FroniusModbusMQTT:
 
         self._shutdown()
 
+    def _cleanup_health_file(self):
+        """Remove stale health file from previous run."""
+        try:
+            if os.path.exists(HEALTH_FILE):
+                os.remove(HEALTH_FILE)
+        except Exception:
+            pass
+
     def _write_health_file(self):
         """Write health status to file for Docker healthcheck"""
         try:
@@ -397,7 +423,9 @@ class FroniusModbusMQTT:
             mqtt_disconnections = self.mqtt_publisher.disconnection_count if self.mqtt_publisher else 0
             influxdb_disconnections = self.influxdb_publisher.disconnection_count if self.influxdb_publisher else 0
 
-            with open(HEALTH_FILE, 'w') as f:
+            # Atomic write: write to temp file then rename to prevent partial reads
+            tmp_file = HEALTH_FILE + '.tmp'
+            with open(tmp_file, 'w') as f:
                 f.write(f"{int(time.time())}\n")
                 f.write(f"{status}\n")
                 f.write(f"mqtt:{mqtt_connected}\n")
@@ -409,6 +437,7 @@ class FroniusModbusMQTT:
                 f.write(f"uptime:{self._format_uptime()}\n")
                 f.write(f"mqtt_disconnections:{mqtt_disconnections}\n")
                 f.write(f"influxdb_disconnections:{influxdb_disconnections}\n")
+            os.replace(tmp_file, HEALTH_FILE)
         except Exception as e:
             self.log.warning(f"Failed to write health file: {e}")
 
@@ -453,6 +482,9 @@ class FroniusModbusMQTT:
                 f"InfluxDB stats: {stats['writes_total']} writes, "
                 f"{stats['writes_failed']} failures"
             )
+
+        # Remove health file so Docker healthcheck sees container as stopped
+        self._cleanup_health_file()
 
         self.log.info("Shutdown complete")
 

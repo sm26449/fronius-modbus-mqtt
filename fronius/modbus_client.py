@@ -156,6 +156,12 @@ class ModbusConnection:
                 try:
                     # Reconnect if needed
                     if not self.connected or not self.client.is_socket_open():
+                        # Close old client to prevent socket leak
+                        if self.client:
+                            try:
+                                self.client.close()
+                            except Exception:
+                                pass
                         self.client = ModbusTcpClient(
                             host=self.config.host,
                             port=self.config.port,
@@ -341,7 +347,8 @@ class DevicePoller(threading.Thread):
         """Calculate backoff delay based on consecutive errors."""
         if consecutive_errors < 3:
             return 0
-        extra_errors = consecutive_errors - 3
+        # Cap extra_errors to prevent overflow (2**50 = PB range)
+        extra_errors = min(consecutive_errors - 3, 6)  # max 2^6=64 -> 640s before cap
         delay = min(10 * (2 ** extra_errors), 60)  # max 60s
         return delay
 
@@ -556,15 +563,20 @@ class DevicePoller(threading.Thread):
 
         # Strategy 2: impossible status_code for time of day
         hour = datetime.now().hour
-        is_night = hour >= 22 or hour < 5
+        is_night = is_night_time(
+            self.modbus_config.night_start_hour,
+            self.modbus_config.night_end_hour
+        )
         if is_night and status_code in (3, 4, 5):  # STARTING, MPPT, THROTTLED
             corruption_detected = True
             reason = f'impossible status {status_code} at night ({hour:02d}:xx)'
 
-        # Strategy 3: FAULT (7) but MPPT strings producing
-        if status_code == 7 and mppt_dc_power > 100:
+        # Strategy 3: FAULT (7) with Model 103 all-zero but MPPT producing
+        # Only flag corruption when Model 103 returned garbage (all zeros).
+        # A real FAULT with non-zero Model 103 data is genuine.
+        if status_code == 7 and model103_all_zero and mppt_dc_power > 100:
             corruption_detected = True
-            reason = f'FAULT but MPPT producing {mppt_dc_power:.0f}W'
+            reason = f'FAULT+all-zero but MPPT producing {mppt_dc_power:.0f}W'
 
         if not corruption_detected:
             data['_corrupted'] = False
@@ -573,7 +585,10 @@ class DevicePoller(threading.Thread):
             return data
 
         # --- Reconciliation ---
-        prev = self._last_valid_data.get(unit_id, {})
+        prev_raw = self._last_valid_data.get(unit_id, {})
+        # Expire stale cached data (>5 minutes old)
+        cached_at = prev_raw.get('_cached_at', 0)
+        prev = prev_raw if (time.time() - cached_at) < 300 else {}
         reconciled = {}
 
         # DC side: use MPPT as ground truth (always correct after connection reset)
@@ -739,12 +754,13 @@ class DevicePoller(threading.Thread):
             curr_name = data.get('status', {}).get('name', '?')
             self.log.warning(f"Inverter {unit_id}: {prev_name}({prev_status}) -> {curr_name}({curr_status})")
 
-        # Cache last valid data for status recovery during corruption
+        # Cache last valid data for status recovery during corruption (TTL: 5 minutes)
         if not data.get('_corrupted'):
             self._last_valid_data[unit_id] = {
                 'status_code': data.get('status_code'),
                 'ac_power': data.get('ac_power'),
                 'ac_voltage_an': data.get('ac_voltage_an'),
+                '_cached_at': time.time(),
             }
 
         # Publish to MQTT
@@ -997,6 +1013,11 @@ class DevicePoller(threading.Thread):
         # Check if device is in backoff period (offline with exponential delay)
         if self._is_device_in_backoff(device_info, 'meter'):
             return False
+
+        # Force connection reset to flush DataManager TCP buffer
+        # (same issue as inverters: stale data in shared buffer)
+        self.connection.connected = False
+        time.sleep(0.3)
 
         regs = None
         for attempt in range(max_retries):

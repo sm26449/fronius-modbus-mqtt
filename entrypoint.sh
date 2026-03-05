@@ -34,7 +34,7 @@ if [ "${INFLUXDB_ENABLED}" = "true" ] && [ -n "${INFLUXDB_URL}" ] && [ -n "${INF
         # Use config file to avoid exposing token in process list
         CURL_AUTH_CONFIG=$(mktemp)
         chmod 600 "$CURL_AUTH_CONFIG"
-        echo "-H \"Authorization: Token ${INFLUXDB_TOKEN}\"" > "$CURL_AUTH_CONFIG"
+        echo "header = \"Authorization: Token ${INFLUXDB_TOKEN}\"" > "$CURL_AUTH_CONFIG"
         trap 'rm -f "$CURL_AUTH_CONFIG"' EXIT
 
         # Check if bucket exists (look for "buckets":[ with content, not error message)

@@ -1,6 +1,7 @@
 """InfluxDB Publisher with batching and change detection"""
 
 import json
+import math
 import time
 import threading
 from typing import Dict, Any, Optional
@@ -246,6 +247,7 @@ class InfluxDBPublisher:
     def _should_write(self, key: str, data: Dict) -> bool:
         """
         Check if data should be written based on mode and interval.
+        Does NOT update cache — call _confirm_write() after successful write.
 
         Args:
             key: Unique device key
@@ -278,14 +280,32 @@ class InfluxDBPublisher:
                     if not changed:
                         return False
 
-                # Update cached values
-                self.last_values[key] = {
-                    k: v for k, v in data.items()
-                    if isinstance(v, (int, float))
-                }
-
-            self.last_write_time[key] = current_time
             return True
+
+    def _confirm_write(self, key: str, data: Dict):
+        """Update cache after a successful write. Prevents data loss on transient failures."""
+        with self.lock:
+            self.last_values[key] = {
+                k: v for k, v in data.items()
+                if isinstance(v, (int, float))
+            }
+            self.last_write_time[key] = time.time()
+
+    def _safe_float(self, value) -> Optional[float]:
+        """Convert to float, returning None for NaN/Infinity to protect InfluxDB batches."""
+        try:
+            val = float(value)
+            if math.isfinite(val):
+                return val
+            self.log.warning(f"Skipping non-finite value: {value}")
+            return None
+        except (TypeError, ValueError):
+            return None
+
+    def _get_write_api(self):
+        """Snapshot the write_api reference under lock. Returns None if unavailable."""
+        with self.lock:
+            return self.write_api
 
     def write_inverter_data(self, device_id: str, data: Dict):
         """
@@ -339,11 +359,13 @@ class InfluxDBPublisher:
 
             for field in numeric_fields:
                 if field in data and data[field] is not None:
-                    point = point.field(field, float(data[field]))
+                    val = self._safe_float(data[field])
+                    if val is not None:
+                        point = point.field(field, val)
 
-            # Status code as field
+            # Status code as field (explicit int)
             if 'status' in data:
-                point = point.field("status_code", data['status'].get('code', 0))
+                point = point.field("status_code", int(data['status'].get('code', 0)))
                 point = point.field("status_alarm", data['status'].get('alarm', False))
 
             # Event count + detailed codes (JSON string for InfluxDB)
@@ -369,20 +391,21 @@ class InfluxDBPublisher:
                     point = point.field("mppt_num_modules", int(mppt['num_modules']))
                 if 'modules' in mppt:
                     for i, module in enumerate(mppt['modules'], 1):
-                        if module.get('dc_current') is not None:
-                            point = point.field(f"string{i}_current", float(module['dc_current']))
-                        if module.get('dc_voltage') is not None:
-                            point = point.field(f"string{i}_voltage", float(module['dc_voltage']))
-                        if module.get('dc_power') is not None:
-                            point = point.field(f"string{i}_power", float(module['dc_power']))
-                        if module.get('dc_energy') is not None:
-                            point = point.field(f"string{i}_energy", float(module['dc_energy']))
-                        if module.get('temperature') is not None:
-                            point = point.field(f"string{i}_temperature", float(module['temperature']))
+                        for mfield in ('dc_current', 'dc_voltage', 'dc_power', 'dc_energy', 'temperature'):
+                            if module.get(mfield) is not None:
+                                val = self._safe_float(module[mfield])
+                                if val is not None:
+                                    influx_name = {'dc_current': 'current', 'dc_voltage': 'voltage',
+                                                   'dc_power': 'power', 'dc_energy': 'energy',
+                                                   'temperature': 'temperature'}[mfield]
+                                    point = point.field(f"string{i}_{influx_name}", val)
 
-            with self.lock:
-                self.write_api.write(bucket=self.config.bucket, record=point)
+            api = self._get_write_api()
+            if api is None:
+                return
+            api.write(bucket=self.config.bucket, record=point)
             self.writes_total += 1
+            self._confirm_write(key, data)
 
             # Write controls data as separate measurement (Model 123, read every 60s)
             if 'controls' in data and data['controls']:
@@ -441,9 +464,12 @@ class InfluxDBPublisher:
         if ctrl.get('var_max_pct') is not None:
             point = point.field("var_max_pct", float(ctrl['var_max_pct']))
 
-        with self.lock:
-            self.write_api.write(bucket=self.config.bucket, record=point)
+        api = self._get_write_api()
+        if api is None:
+            return
+        api.write(bucket=self.config.bucket, record=point)
         self.writes_total += 1
+        self._confirm_write(key, ctrl)
 
     def write_meter_data(self, device_id: str, data: Dict):
         """
@@ -489,11 +515,16 @@ class InfluxDBPublisher:
 
             for field in numeric_fields:
                 if field in data and data[field] is not None:
-                    point = point.field(field, float(data[field]))
+                    val = self._safe_float(data[field])
+                    if val is not None:
+                        point = point.field(field, val)
 
-            with self.lock:
-                self.write_api.write(bucket=self.config.bucket, record=point)
+            api = self._get_write_api()
+            if api is None:
+                return
+            api.write(bucket=self.config.bucket, record=point)
             self.writes_total += 1
+            self._confirm_write(key, data)
 
         except Exception as e:
             self.writes_failed += 1
@@ -535,11 +566,16 @@ class InfluxDBPublisher:
 
             for field in numeric_fields:
                 if field in data and data[field] is not None:
-                    point = point.field(field, float(data[field]))
+                    val = self._safe_float(data[field])
+                    if val is not None:
+                        point = point.field(field, val)
 
-            with self.lock:
-                self.write_api.write(bucket=self.config.bucket, record=point)
+            api = self._get_write_api()
+            if api is None:
+                return
+            api.write(bucket=self.config.bucket, record=point)
             self.writes_total += 1
+            self._confirm_write(key, data)
 
         except Exception as e:
             self.writes_failed += 1

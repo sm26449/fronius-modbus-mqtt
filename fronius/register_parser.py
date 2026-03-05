@@ -169,8 +169,7 @@ class RegisterParser:
             return None
         # Validate scale factor range (typically -10 to +10)
         if scale_factor < -10 or scale_factor > 10:
-            if self.debug_config and self.debug_config.log_scale_factors:
-                self.log.debug(f"Scale factor out of range: value={value}, sf={scale_factor}")
+            self.log.warning(f"Scale factor out of range: value={value}, sf={scale_factor}")
             return None
         try:
             result = float(value) * (10 ** scale_factor)
