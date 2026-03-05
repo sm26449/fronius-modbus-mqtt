@@ -34,7 +34,7 @@ COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
 # Healthcheck
-HEALTHCHECK --interval=60s --timeout=10s --start-period=60s --retries=3 \
+HEALTHCHECK --interval=60s --timeout=10s --start-period=300s --retries=3 \
     CMD python /app/healthcheck.py || exit 1
 
 ENTRYPOINT ["/entrypoint.sh"]

@@ -547,6 +547,19 @@ class DevicePoller(threading.Thread):
         mppt_dc_current = sum(m.get('dc_current', 0) or 0 for m in modules)
         mppt_dc_voltage = max((m.get('dc_voltage', 0) or 0 for m in modules), default=0)
 
+        # Sanity check MPPT values before trusting as ground truth
+        # Fronius max: 75kWp system, ~1000V string voltage, ~100A per string
+        if mppt_dc_power > 100000 or mppt_dc_voltage > 1000 or mppt_dc_current > 200:
+            self.log.warning(
+                f"Inverter {unit_id}: MPPT values out of range "
+                f"(P={mppt_dc_power:.0f}W V={mppt_dc_voltage:.0f}V I={mppt_dc_current:.1f}A), "
+                f"skipping validation"
+            )
+            data['_corrupted'] = True
+            data['_corruption_reason'] = f'MPPT out of range P={mppt_dc_power:.0f}W'
+            data['_reconciled'] = False
+            return data
+
         status_code = data.get('status_code', 0)
         corruption_detected = False
         reason = ''
@@ -567,7 +580,8 @@ class DevicePoller(threading.Thread):
             self.modbus_config.night_start_hour,
             self.modbus_config.night_end_hour
         )
-        if is_night and status_code in (3, 4, 5):  # STARTING, MPPT, THROTTLED
+        # Only flag MPPT(4) and THROTTLED(5) — STARTING(3) is legitimate at dawn
+        if is_night and status_code in (4, 5):
             corruption_detected = True
             reason = f'impossible status {status_code} at night ({hour:02d}:xx)'
 
@@ -811,6 +825,13 @@ class DevicePoller(threading.Thread):
         sf_dcw = regs[4] if regs[4] < 32768 else regs[4] - 65536
         sf_dcwh = regs[5] if regs[5] < 32768 else regs[5] - 65536
 
+        # Validate scale factors (SunSpec range: -10 to +10)
+        # Corrupted scale factors produce astronomical values used as "ground truth"
+        for name, sf in [('DCA', sf_dca), ('DCV', sf_dcv), ('DCW', sf_dcw), ('DCWH', sf_dcwh)]:
+            if sf < -10 or sf > 10:
+                self.log.warning(f"Inverter {unit_id}: MPPT {name} scale factor out of range: {sf}")
+                return None
+
         # Extract global data (offset 6-9, i.e., 40260-40263)
         # Evt at offset 6-7, N at offset 8, TmsPer at offset 9
         num_modules = regs[8]
@@ -1035,6 +1056,11 @@ class DevicePoller(threading.Thread):
                 return False
 
         data = self.parser.parse_meter_measurements(regs)
+        if not data:
+            self.log.warning(f"Meter {unit_id}: parse returned empty data")
+            self._update_runtime_on_failure(device_info, 'meter')
+            return False
+
         data['device_id'] = unit_id
         data['serial_number'] = device_info.get('serial_number', '')
         data['model'] = device_info.get('model', '')

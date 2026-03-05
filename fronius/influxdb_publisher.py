@@ -124,13 +124,12 @@ class InfluxDBPublisher:
                     retry_callback=self._on_write_retry,
                 )
 
-                # Test connection
-                health = self.client.health()
-                if health.status == "pass":
+                # Test connection (ping() replaces deprecated health())
+                if self.client.ping():
                     self.connected = True
                     self.log.info(f"InfluxDB connected to {self.config.url}")
                 else:
-                    self.log.warning(f"InfluxDB health check failed: {health.message}")
+                    self.log.warning("InfluxDB ping failed")
 
             except ImportError:
                 self.log.warning(
@@ -196,9 +195,8 @@ class InfluxDBPublisher:
                         self.connected = False
                         self._stop_reconnect.wait(RECONNECT_CHECK_INTERVAL)
                         continue
-                    health = client.health()
-                    if health.status != "pass":
-                        self.log.warning(f"InfluxDB health check failed: {health.message}")
+                    if not client.ping():
+                        self.log.warning("InfluxDB ping failed")
                         self.connected = False
                 except Exception as e:
                     self.log.warning(f"InfluxDB health check failed: {e}")
@@ -583,7 +581,12 @@ class InfluxDBPublisher:
             self._handle_write_error(e)
 
     def flush(self):
-        """Flush pending writes"""
+        """Flush pending writes.
+
+        NOTE: influxdb-client WriteApi.flush() is a no-op in batching mode.
+        The actual flush happens in close() which disposes the RxPY pipeline.
+        Retained for forward-compatibility if the library implements it.
+        """
         if self.write_api:
             try:
                 self.write_api.flush()

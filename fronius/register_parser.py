@@ -61,7 +61,7 @@ class RegisterParser:
         """
         bytes_data = b''
         for reg in registers:
-            bytes_data += struct.pack('>H', reg)
+            bytes_data += struct.pack('>H', reg & 0xFFFF)
         return bytes_data.decode('ascii', errors='ignore').rstrip('\x00 ')
 
     def decode_int16(self, value: int) -> Optional[int]:
@@ -69,11 +69,13 @@ class RegisterParser:
         Convert uint16 to signed int16.
 
         Args:
-            value: Unsigned 16-bit value
+            value: Unsigned 16-bit value (0-65535)
 
         Returns:
-            Signed value or None if not implemented
+            Signed value or None if not implemented or out of range
         """
+        if not (0 <= value <= 0xFFFF):
+            return None
         if value == self.NOT_IMPLEMENTED_INT16:
             return None
         if value >= 0x8000:
@@ -85,11 +87,13 @@ class RegisterParser:
         Decode uint16, checking for not-implemented value.
 
         Args:
-            value: Unsigned 16-bit value
+            value: Unsigned 16-bit value (0-65535)
 
         Returns:
-            Value or None if not implemented
+            Value or None if not implemented or out of range
         """
+        if not (0 <= value <= 0xFFFF):
+            return None
         if value == self.NOT_IMPLEMENTED_UINT16:
             return None
         return value
@@ -102,9 +106,11 @@ class RegisterParser:
             registers: Two uint16 values [high_word, low_word]
 
         Returns:
-            32-bit unsigned value or None if not implemented
+            32-bit unsigned value or None if not implemented or out of range
         """
         if len(registers) < 2:
+            return None
+        if not (0 <= registers[0] <= 0xFFFF and 0 <= registers[1] <= 0xFFFF):
             return None
         value = (registers[0] << 16) | registers[1]
         if value == self.NOT_IMPLEMENTED_UINT32:

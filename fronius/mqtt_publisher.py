@@ -365,25 +365,28 @@ class MQTTPublisher:
         self.client.reconnect_delay_set(min_delay=1, max_delay=60)
 
     def _on_connect(self, client, userdata, flags, reason_code, properties=None):
-        """Handle connection established — re-publish online status and clear cache."""
-        if reason_code == 0:
-            self.connected = True
-            self.connection_count += 1
-            self.log.info(
-                f"MQTT connected to {self.config.broker}:{self.config.port}"
-            )
-            # Re-publish online status (broker restart loses retained messages)
-            status_topic = f"{self.config.topic_prefix}/status"
-            try:
-                self.client.publish(status_topic, "online", qos=1, retain=True)
-            except Exception:
-                pass
-            # Clear last_values cache to force re-publish of all current values
-            with self.lock:
-                self.last_values.clear()
-        else:
-            self.connected = False
-            self.log.error(f"MQTT connection failed: {reason_code}")
+        """Handle connection established — clear cache and re-publish online status."""
+        try:
+            if reason_code == 0:
+                self.connected = True
+                self.connection_count += 1
+                self.log.info(
+                    f"MQTT connected to {self.config.broker}:{self.config.port}"
+                )
+                # Clear cache FIRST to force re-publish of all current values
+                with self.lock:
+                    self.last_values.clear()
+                # Then re-publish online status (broker restart loses retained messages)
+                status_topic = f"{self.config.topic_prefix}/status"
+                try:
+                    self.client.publish(status_topic, "online", qos=1, retain=True)
+                except Exception:
+                    pass
+            else:
+                self.connected = False
+                self.log.error(f"MQTT connection failed: {reason_code}")
+        except Exception as e:
+            self.log.error(f"Error in on_connect callback: {e}")
 
     def _on_disconnect(self, client, userdata, flags, reason_code, properties=None):
         """Handle disconnection. Paho auto-reconnects; monitor thread logs state."""
@@ -566,9 +569,16 @@ class MQTTPublisher:
             return False
 
     def _confirm_publish(self, topic: str, value: Any):
-        """Update cache after successful publish."""
+        """Update cache after successful publish.
+
+        Store rounded float to match what was actually sent as payload,
+        preventing phantom re-publishes from floating-point drift.
+        """
         with self.lock:
-            self.last_values[topic] = value
+            if isinstance(value, float):
+                self.last_values[topic] = round(value, 3)
+            else:
+                self.last_values[topic] = value
 
     def _publish(self, topic: str, payload: str, retain: bool = None) -> bool:
         """

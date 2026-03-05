@@ -178,6 +178,14 @@ class InfluxDBConfig:
             raise ConfigValidationError(
                 f"influxdb.publish_mode={self.publish_mode!r} must be 'changed', 'all', or empty"
             )
+        # Cross-field validation: required fields when enabled
+        if self.enabled:
+            if not self.url:
+                raise ConfigValidationError("influxdb.url is required when InfluxDB is enabled")
+            if not self.token:
+                raise ConfigValidationError("influxdb.token is required when InfluxDB is enabled")
+            if not self.org:
+                raise ConfigValidationError("influxdb.org is required when InfluxDB is enabled")
 
     def __repr__(self) -> str:
         masked_token = "***" if self.token else ""
@@ -276,10 +284,10 @@ class ConfigLoader:
         # Parse general settings
         gen = self.config.get('general', {})
         self.general = GeneralConfig(
-            log_level=_env_get('LOG_LEVEL', gen.get('log_level', 'INFO')),
-            log_file=_env_get('LOG_FILE', gen.get('log_file', '')),
-            poll_interval=_env_get('POLL_INTERVAL', gen.get('poll_interval', 5), int),
-            publish_mode=_env_get('PUBLISH_MODE', gen.get('publish_mode', 'changed'))
+            log_level=_env_get('LOG_LEVEL', gen.get('log_level') or 'INFO'),
+            log_file=_env_get('LOG_FILE', gen.get('log_file') or ''),
+            poll_interval=_env_get('POLL_INTERVAL', gen.get('poll_interval') or 5, int),
+            publish_mode=_env_get('PUBLISH_MODE', gen.get('publish_mode') or 'changed')
         )
 
         # Parse modbus settings (required - from env or yaml)

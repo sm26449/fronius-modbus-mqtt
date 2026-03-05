@@ -112,7 +112,10 @@ class FroniusModbusMQTT:
         """
         if device_type == 'inverter':
             if self.mqtt_publisher:
-                self.mqtt_publisher.publish_inverter_data(str(device_id), data)
+                try:
+                    self.mqtt_publisher.publish_inverter_data(str(device_id), data)
+                except Exception as e:
+                    self.log.error(f"MQTT publish error for inverter {device_id}: {e}")
             if self.influxdb_publisher:
                 try:
                     self.influxdb_publisher.write_inverter_data(str(device_id), data)
@@ -120,7 +123,10 @@ class FroniusModbusMQTT:
                     self.log.error(f"InfluxDB write error for inverter {device_id}: {e}")
         elif device_type == 'meter':
             if self.mqtt_publisher:
-                self.mqtt_publisher.publish_meter_data(str(device_id), data)
+                try:
+                    self.mqtt_publisher.publish_meter_data(str(device_id), data)
+                except Exception as e:
+                    self.log.error(f"MQTT publish error for meter {device_id}: {e}")
             if self.influxdb_publisher:
                 try:
                     self.influxdb_publisher.write_meter_data(str(device_id), data)
@@ -128,7 +134,10 @@ class FroniusModbusMQTT:
                     self.log.error(f"InfluxDB write error for meter {device_id}: {e}")
         elif device_type == 'storage':
             if self.mqtt_publisher:
-                self.mqtt_publisher.publish_storage_data(str(device_id), data)
+                try:
+                    self.mqtt_publisher.publish_storage_data(str(device_id), data)
+                except Exception as e:
+                    self.log.error(f"MQTT publish error for storage {device_id}: {e}")
             if self.influxdb_publisher:
                 try:
                     self.influxdb_publisher.write_storage_data(str(device_id), data)
@@ -291,11 +300,13 @@ class FroniusModbusMQTT:
         # Initialize publishers FIRST (before modbus, so callback can use them)
         if not self._init_mqtt():
             self.log.error("MQTT initialization failed, exiting")
+            self._shutdown()
             sys.exit(1)
         self._init_influxdb()
 
         # Initialize Modbus (with publish callback)
         if not self._init_modbus():
+            self._shutdown()
             sys.exit(1)
 
         # Discover devices
@@ -306,6 +317,7 @@ class FroniusModbusMQTT:
 
         if not self.modbus_client.inverters and not self.modbus_client.meters:
             self.log.error("No devices found, exiting")
+            self._shutdown()
             sys.exit(1)
 
         # Start device polling threads (they publish directly via callback)
