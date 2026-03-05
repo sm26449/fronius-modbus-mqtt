@@ -38,6 +38,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Per-inverter status change logging at WARNING level (after reconciliation, so corrected status is logged)
   - Example: `Inverter 1: MPPT(4) -> FAULT(7)` or `Inverter 2: STARTING(3) -> MPPT(4)`
 
+### Fixed
+- **Socket Leak Prevention** — Close old Modbus TCP client before creating new one on reconnect
+- **Backoff Overflow Protection** — Cap exponential backoff to `2^6` (64s max) preventing unbounded growth
+- **Meter Buffer Flush** — TCP connection reset + 0.3s delay before meter reads (same pattern as inverters)
+- **Meter Empty Data Guard** — Skip publish when meter parse returns empty data instead of writing zeros
+- **FAULT False Positive Fix** — Status code 7 (FAULT) only flagged as corruption when Model 103 is also all-zero AND MPPT is producing; standalone FAULT without all-zero data is treated as real
+- **Dawn STARTING Exclusion** — Status code 3 (STARTING) no longer flagged as corruption at night; only MPPT(4) and THROTTLED(5) are impossible at night
+- **Last Valid Data TTL** — 5-minute cache expiry prevents stale status recovery from hours-old data
+- **MPPT Scale Factor Validation** — Reject MPPT data when scale factors outside [-10, +10] range (corrupted SFs)
+- **MPPT Sanity Bounds** — Skip validation when MPPT values exceed physical limits (P>100kW, V>1kV, I>200A)
+- **Register Parser Range Checks** — `decode_int16`, `decode_uint16`, `decode_uint32` validate input range before parsing
+- **Register Parser Negative Values** — `struct.pack` mask (`reg & 0xFFFF`) prevents error on negative register values
+- **Scale Factor Always WARNING** — Out-of-range scale factors logged at WARNING level (was sometimes DEBUG)
+- **MQTT Disconnect Order** — `disconnect()` before `loop_stop()` per paho-mqtt documentation
+- **MQTT Publish Error Isolation** — All three `publish_*_data` methods wrapped in try/except (outer/inner pattern)
+- **MQTT _publish_data Isolation** — Publisher errors in main callback don't crash the polling thread
+- **MQTT _on_connect Safety** — Full try/except wrapper; cache cleared BEFORE online status publish
+- **MQTT Float Cache Precision** — Cache stores `round(value, 3)` to prevent phantom re-publishes from float drift
+- **InfluxDB health() → ping()** — Replace deprecated `health()` API with `ping()` (influxdb-client 1.30+)
+- **InfluxDB flush() Documented** — `flush()` is a no-op in batching mode; documented for forward-compatibility
+- **InfluxDB Cross-Field Validation** — URL, token, and org are required when InfluxDB is enabled
+- **InfluxDB NaN Filter** — Skip fields with NaN/Inf values before writing (InfluxDB rejects entire batch on NaN)
+- **InfluxDB Write API Race Condition** — `write_api` access protected by lock during reconnection
+- **Config YAML None Handling** — `None` values from YAML (`key:` without value) fall back to defaults via `or` pattern
+- **Health File Atomic Writes** — Write to `.tmp` then `os.replace()` prevents partial reads by Docker healthcheck
+- **Health File Lifecycle** — Cleanup on startup (stale from previous run) and shutdown
+- **Startup Cleanup** — `_shutdown()` called before `sys.exit(1)` on all failure paths
+- **Healthcheck Start Period** — Increased from 60s to 300s to accommodate maximum Modbus retry window (~240s)
+- **Log File Encoding** — `RotatingFileHandler` uses explicit `encoding='utf-8'`
+- **Night Hours from Config** — Corruption detection uses `night_start_hour`/`night_end_hour` from config (was hardcoded 22/5)
+
+### Security
+- **Entrypoint Shell Hardening** — `set -eo pipefail` for proper error propagation
+- **Entrypoint Input Validation** — `INFLUXDB_BUCKET` and `INFLUXDB_ORG` validated with regex (`^[a-zA-Z0-9_-]+$`) to prevent shell injection
+- **Entrypoint Curl Error Handling** — Explicit error handling instead of broken pipe semantics
+- **Entrypoint Dead Code Removal** — Removed `trap EXIT` that never fires after `exec`
+- **Entrypoint Non-Recursive Chown** — `chown` on volume directories only (not recursive into mounted data)
+
 ### Changed
 - **Optimized Modbus Read Sequence**
   - TCP connection reset moved from between Model 103 and MPPT reads to before Model 103
@@ -448,7 +486,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 | Version | Date | Highlights |
 |---------|------|------------|
-| 1.5.0 | 2026-03-05 | Buffer corruption detection, night inverter skip, diagnostic debug system |
+| 1.5.0 | 2026-03-05 | Buffer corruption detection, night inverter skip, debug system, 2× audit hardening |
 | 1.4.1 | 2026-02-26 | Storage InfluxDB, MPPT temp, thread safety, HA discovery expansion |
 | 1.4.0 | 2026-02-26 | Resilient reconnection, data loss prevention, graceful shutdown |
 | 1.3.1 | 2026-02-26 | InfluxDB events_json field for fault event persistence |
