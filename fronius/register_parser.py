@@ -179,6 +179,10 @@ class RegisterParser:
             return None
         try:
             result = float(value) * (10 ** scale_factor)
+            # Round to eliminate IEEE 754 floating-point noise
+            # e.g. 4998 × 10⁻² = 49.980000000000004 → 49.98
+            if scale_factor < 0:
+                result = round(result, -scale_factor)
             if self.debug_config and self.debug_config.log_scale_factors:
                 self.log.debug(f"Scale: {value} × 10^{scale_factor} = {result}")
             return result
