@@ -3,29 +3,93 @@
   "description": "Fronius SunSpec Modbus Register Map",
   "sunspec_base": 40000,
   "sunspec_id": "0x53756E53",
-
   "common_block": {
     "description": "SunSpec Common Model Block (Model 1)",
     "model_id": 1,
     "registers": [
-      {"name": "SunSpec_ID", "address": 40001, "count": 2, "type": "uint32", "description": "SunSpec identifier (0x53756E53 = 'SunS')"},
-      {"name": "SunSpec_DID", "address": 40003, "count": 1, "type": "uint16", "description": "Common model ID (always 1)"},
-      {"name": "SunSpec_Length", "address": 40004, "count": 1, "type": "uint16", "description": "Common block length (65)"},
-      {"name": "Manufacturer", "address": 40005, "count": 16, "type": "string32", "description": "Manufacturer name"},
-      {"name": "Model", "address": 40021, "count": 16, "type": "string32", "description": "Device model"},
-      {"name": "Options", "address": 40037, "count": 8, "type": "string16", "description": "Options"},
-      {"name": "Version", "address": 40045, "count": 8, "type": "string16", "description": "Software version"},
-      {"name": "SerialNumber", "address": 40053, "count": 16, "type": "string32", "description": "Serial number"},
-      {"name": "DeviceAddress", "address": 40069, "count": 1, "type": "uint16", "description": "Modbus device address"}
+      {
+        "name": "SunSpec_ID",
+        "address": 40001,
+        "count": 2,
+        "type": "uint32",
+        "description": "SunSpec identifier (0x53756E53 = 'SunS')"
+      },
+      {
+        "name": "SunSpec_DID",
+        "address": 40003,
+        "count": 1,
+        "type": "uint16",
+        "description": "Common model ID (always 1)"
+      },
+      {
+        "name": "SunSpec_Length",
+        "address": 40004,
+        "count": 1,
+        "type": "uint16",
+        "description": "Common block length (65)"
+      },
+      {
+        "name": "Manufacturer",
+        "address": 40005,
+        "count": 16,
+        "type": "string32",
+        "description": "Manufacturer name"
+      },
+      {
+        "name": "Model",
+        "address": 40021,
+        "count": 16,
+        "type": "string32",
+        "description": "Device model"
+      },
+      {
+        "name": "Options",
+        "address": 40037,
+        "count": 8,
+        "type": "string16",
+        "description": "Options"
+      },
+      {
+        "name": "Version",
+        "address": 40045,
+        "count": 8,
+        "type": "string16",
+        "description": "Software version"
+      },
+      {
+        "name": "SerialNumber",
+        "address": 40053,
+        "count": 16,
+        "type": "string32",
+        "description": "Serial number"
+      },
+      {
+        "name": "DeviceAddress",
+        "address": 40069,
+        "count": 1,
+        "type": "uint16",
+        "description": "Modbus device address"
+      }
     ]
   },
-
   "inverter": {
     "model_header": {
       "description": "Inverter Model Header",
       "registers": [
-        {"name": "Model_ID", "address": 40070, "count": 1, "type": "uint16", "description": "Model type: 101=single, 102=split, 103=three-phase"},
-        {"name": "Model_Length", "address": 40071, "count": 1, "type": "uint16", "description": "Model block length"}
+        {
+          "name": "Model_ID",
+          "address": 40070,
+          "count": 1,
+          "type": "uint16",
+          "description": "Model type: 101=single, 102=split, 103=three-phase"
+        },
+        {
+          "name": "Model_Length",
+          "address": 40071,
+          "count": 1,
+          "type": "uint16",
+          "description": "Model block length"
+        }
       ]
     },
     "model_types": {
@@ -36,72 +100,394 @@
     "measurements": {
       "description": "Inverter Measurements Block",
       "registers": [
-        {"name": "A", "address": 40072, "count": 1, "type": "uint16", "scale_factor": "A_SF", "unit": "A", "description": "AC Total Current"},
-        {"name": "AphA", "address": 40073, "count": 1, "type": "uint16", "scale_factor": "A_SF", "unit": "A", "description": "AC Phase A Current"},
-        {"name": "AphB", "address": 40074, "count": 1, "type": "uint16", "scale_factor": "A_SF", "unit": "A", "description": "AC Phase B Current", "models": ["102", "103"]},
-        {"name": "AphC", "address": 40075, "count": 1, "type": "uint16", "scale_factor": "A_SF", "unit": "A", "description": "AC Phase C Current", "models": ["103"]},
-        {"name": "A_SF", "address": 40076, "count": 1, "type": "sunssf", "description": "Current Scale Factor"},
-
-        {"name": "PPVphAB", "address": 40077, "count": 1, "type": "uint16", "scale_factor": "V_SF", "unit": "V", "description": "AC Voltage Phase AB"},
-        {"name": "PPVphBC", "address": 40078, "count": 1, "type": "uint16", "scale_factor": "V_SF", "unit": "V", "description": "AC Voltage Phase BC", "models": ["103"]},
-        {"name": "PPVphCA", "address": 40079, "count": 1, "type": "uint16", "scale_factor": "V_SF", "unit": "V", "description": "AC Voltage Phase CA", "models": ["103"]},
-        {"name": "PhVphA", "address": 40080, "count": 1, "type": "uint16", "scale_factor": "V_SF", "unit": "V", "description": "AC Voltage Phase A-N"},
-        {"name": "PhVphB", "address": 40081, "count": 1, "type": "uint16", "scale_factor": "V_SF", "unit": "V", "description": "AC Voltage Phase B-N", "models": ["102", "103"]},
-        {"name": "PhVphC", "address": 40082, "count": 1, "type": "uint16", "scale_factor": "V_SF", "unit": "V", "description": "AC Voltage Phase C-N", "models": ["103"]},
-        {"name": "V_SF", "address": 40083, "count": 1, "type": "sunssf", "description": "Voltage Scale Factor"},
-
-        {"name": "W", "address": 40084, "count": 1, "type": "int16", "scale_factor": "W_SF", "unit": "W", "description": "AC Power"},
-        {"name": "W_SF", "address": 40085, "count": 1, "type": "sunssf", "description": "Power Scale Factor"},
-
-        {"name": "Hz", "address": 40086, "count": 1, "type": "uint16", "scale_factor": "Hz_SF", "unit": "Hz", "description": "AC Frequency"},
-        {"name": "Hz_SF", "address": 40087, "count": 1, "type": "sunssf", "description": "Frequency Scale Factor"},
-
-        {"name": "VA", "address": 40088, "count": 1, "type": "int16", "scale_factor": "VA_SF", "unit": "VA", "description": "Apparent Power"},
-        {"name": "VA_SF", "address": 40089, "count": 1, "type": "sunssf", "description": "Apparent Power Scale Factor"},
-
-        {"name": "VAr", "address": 40090, "count": 1, "type": "int16", "scale_factor": "VAr_SF", "unit": "var", "description": "Reactive Power"},
-        {"name": "VAr_SF", "address": 40091, "count": 1, "type": "sunssf", "description": "Reactive Power Scale Factor"},
-
-        {"name": "PF", "address": 40092, "count": 1, "type": "int16", "scale_factor": "PF_SF", "unit": "%", "description": "Power Factor"},
-        {"name": "PF_SF", "address": 40093, "count": 1, "type": "sunssf", "description": "Power Factor Scale Factor"},
-
-        {"name": "WH", "address": 40094, "count": 2, "type": "acc32", "scale_factor": "WH_SF", "unit": "Wh", "description": "AC Lifetime Energy"},
-        {"name": "WH_SF", "address": 40096, "count": 1, "type": "sunssf", "description": "Energy Scale Factor"},
-
-        {"name": "DCA", "address": 40097, "count": 1, "type": "uint16", "scale_factor": "DCA_SF", "unit": "A", "description": "DC Current"},
-        {"name": "DCA_SF", "address": 40098, "count": 1, "type": "sunssf", "description": "DC Current Scale Factor"},
-
-        {"name": "DCV", "address": 40099, "count": 1, "type": "uint16", "scale_factor": "DCV_SF", "unit": "V", "description": "DC Voltage"},
-        {"name": "DCV_SF", "address": 40100, "count": 1, "type": "sunssf", "description": "DC Voltage Scale Factor"},
-
-        {"name": "DCW", "address": 40101, "count": 1, "type": "int16", "scale_factor": "DCW_SF", "unit": "W", "description": "DC Power"},
-        {"name": "DCW_SF", "address": 40102, "count": 1, "type": "sunssf", "description": "DC Power Scale Factor"},
-
-        {"name": "TmpCab", "address": 40103, "count": 1, "type": "int16", "scale_factor": "Tmp_SF", "unit": "C", "description": "Cabinet Temperature"},
-        {"name": "TmpSnk", "address": 40104, "count": 1, "type": "int16", "scale_factor": "Tmp_SF", "unit": "C", "description": "Heat Sink Temperature"},
-        {"name": "TmpTrns", "address": 40105, "count": 1, "type": "int16", "scale_factor": "Tmp_SF", "unit": "C", "description": "Transformer Temperature"},
-        {"name": "TmpOt", "address": 40106, "count": 1, "type": "int16", "scale_factor": "Tmp_SF", "unit": "C", "description": "Other Temperature"},
-        {"name": "Tmp_SF", "address": 40107, "count": 1, "type": "sunssf", "description": "Temperature Scale Factor"},
-
-        {"name": "St", "address": 40108, "count": 1, "type": "enum16", "description": "Operating State"},
-        {"name": "StVnd", "address": 40109, "count": 1, "type": "enum16", "description": "Vendor Operating State"},
-
-        {"name": "Evt1", "address": 40110, "count": 2, "type": "bitfield32", "description": "Event Flags 1"},
-        {"name": "Evt2", "address": 40112, "count": 2, "type": "bitfield32", "description": "Event Flags 2"},
-        {"name": "EvtVnd1", "address": 40114, "count": 2, "type": "bitfield32", "description": "Vendor Event Flags 1"},
-        {"name": "EvtVnd2", "address": 40116, "count": 2, "type": "bitfield32", "description": "Vendor Event Flags 2"},
-        {"name": "EvtVnd3", "address": 40118, "count": 2, "type": "bitfield32", "description": "Vendor Event Flags 3"},
-        {"name": "EvtVnd4", "address": 40120, "count": 2, "type": "bitfield32", "description": "Vendor Event Flags 4"}
+        {
+          "name": "A",
+          "address": 40072,
+          "count": 1,
+          "type": "uint16",
+          "scale_factor": "A_SF",
+          "unit": "A",
+          "description": "AC Total Current"
+        },
+        {
+          "name": "AphA",
+          "address": 40073,
+          "count": 1,
+          "type": "uint16",
+          "scale_factor": "A_SF",
+          "unit": "A",
+          "description": "AC Phase A Current"
+        },
+        {
+          "name": "AphB",
+          "address": 40074,
+          "count": 1,
+          "type": "uint16",
+          "scale_factor": "A_SF",
+          "unit": "A",
+          "description": "AC Phase B Current",
+          "models": [
+            "102",
+            "103"
+          ]
+        },
+        {
+          "name": "AphC",
+          "address": 40075,
+          "count": 1,
+          "type": "uint16",
+          "scale_factor": "A_SF",
+          "unit": "A",
+          "description": "AC Phase C Current",
+          "models": [
+            "103"
+          ]
+        },
+        {
+          "name": "A_SF",
+          "address": 40076,
+          "count": 1,
+          "type": "sunssf",
+          "description": "Current Scale Factor"
+        },
+        {
+          "name": "PPVphAB",
+          "address": 40077,
+          "count": 1,
+          "type": "uint16",
+          "scale_factor": "V_SF",
+          "unit": "V",
+          "description": "AC Voltage Phase AB"
+        },
+        {
+          "name": "PPVphBC",
+          "address": 40078,
+          "count": 1,
+          "type": "uint16",
+          "scale_factor": "V_SF",
+          "unit": "V",
+          "description": "AC Voltage Phase BC",
+          "models": [
+            "103"
+          ]
+        },
+        {
+          "name": "PPVphCA",
+          "address": 40079,
+          "count": 1,
+          "type": "uint16",
+          "scale_factor": "V_SF",
+          "unit": "V",
+          "description": "AC Voltage Phase CA",
+          "models": [
+            "103"
+          ]
+        },
+        {
+          "name": "PhVphA",
+          "address": 40080,
+          "count": 1,
+          "type": "uint16",
+          "scale_factor": "V_SF",
+          "unit": "V",
+          "description": "AC Voltage Phase A-N"
+        },
+        {
+          "name": "PhVphB",
+          "address": 40081,
+          "count": 1,
+          "type": "uint16",
+          "scale_factor": "V_SF",
+          "unit": "V",
+          "description": "AC Voltage Phase B-N",
+          "models": [
+            "102",
+            "103"
+          ]
+        },
+        {
+          "name": "PhVphC",
+          "address": 40082,
+          "count": 1,
+          "type": "uint16",
+          "scale_factor": "V_SF",
+          "unit": "V",
+          "description": "AC Voltage Phase C-N",
+          "models": [
+            "103"
+          ]
+        },
+        {
+          "name": "V_SF",
+          "address": 40083,
+          "count": 1,
+          "type": "sunssf",
+          "description": "Voltage Scale Factor"
+        },
+        {
+          "name": "W",
+          "address": 40084,
+          "count": 1,
+          "type": "int16",
+          "scale_factor": "W_SF",
+          "unit": "W",
+          "description": "AC Power"
+        },
+        {
+          "name": "W_SF",
+          "address": 40085,
+          "count": 1,
+          "type": "sunssf",
+          "description": "Power Scale Factor"
+        },
+        {
+          "name": "Hz",
+          "address": 40086,
+          "count": 1,
+          "type": "uint16",
+          "scale_factor": "Hz_SF",
+          "unit": "Hz",
+          "description": "AC Frequency"
+        },
+        {
+          "name": "Hz_SF",
+          "address": 40087,
+          "count": 1,
+          "type": "sunssf",
+          "description": "Frequency Scale Factor"
+        },
+        {
+          "name": "VA",
+          "address": 40088,
+          "count": 1,
+          "type": "int16",
+          "scale_factor": "VA_SF",
+          "unit": "VA",
+          "description": "Apparent Power"
+        },
+        {
+          "name": "VA_SF",
+          "address": 40089,
+          "count": 1,
+          "type": "sunssf",
+          "description": "Apparent Power Scale Factor"
+        },
+        {
+          "name": "VAr",
+          "address": 40090,
+          "count": 1,
+          "type": "int16",
+          "scale_factor": "VAr_SF",
+          "unit": "var",
+          "description": "Reactive Power"
+        },
+        {
+          "name": "VAr_SF",
+          "address": 40091,
+          "count": 1,
+          "type": "sunssf",
+          "description": "Reactive Power Scale Factor"
+        },
+        {
+          "name": "PF",
+          "address": 40092,
+          "count": 1,
+          "type": "int16",
+          "scale_factor": "PF_SF",
+          "unit": "%",
+          "description": "Power Factor"
+        },
+        {
+          "name": "PF_SF",
+          "address": 40093,
+          "count": 1,
+          "type": "sunssf",
+          "description": "Power Factor Scale Factor"
+        },
+        {
+          "name": "WH",
+          "address": 40094,
+          "count": 2,
+          "type": "acc32",
+          "scale_factor": "WH_SF",
+          "unit": "Wh",
+          "description": "AC Lifetime Energy"
+        },
+        {
+          "name": "WH_SF",
+          "address": 40096,
+          "count": 1,
+          "type": "sunssf",
+          "description": "Energy Scale Factor"
+        },
+        {
+          "name": "DCA",
+          "address": 40097,
+          "count": 1,
+          "type": "uint16",
+          "scale_factor": "DCA_SF",
+          "unit": "A",
+          "description": "DC Current"
+        },
+        {
+          "name": "DCA_SF",
+          "address": 40098,
+          "count": 1,
+          "type": "sunssf",
+          "description": "DC Current Scale Factor"
+        },
+        {
+          "name": "DCV",
+          "address": 40099,
+          "count": 1,
+          "type": "uint16",
+          "scale_factor": "DCV_SF",
+          "unit": "V",
+          "description": "DC Voltage"
+        },
+        {
+          "name": "DCV_SF",
+          "address": 40100,
+          "count": 1,
+          "type": "sunssf",
+          "description": "DC Voltage Scale Factor"
+        },
+        {
+          "name": "DCW",
+          "address": 40101,
+          "count": 1,
+          "type": "int16",
+          "scale_factor": "DCW_SF",
+          "unit": "W",
+          "description": "DC Power"
+        },
+        {
+          "name": "DCW_SF",
+          "address": 40102,
+          "count": 1,
+          "type": "sunssf",
+          "description": "DC Power Scale Factor"
+        },
+        {
+          "name": "TmpCab",
+          "address": 40103,
+          "count": 1,
+          "type": "int16",
+          "scale_factor": "Tmp_SF",
+          "unit": "C",
+          "description": "Cabinet Temperature"
+        },
+        {
+          "name": "TmpSnk",
+          "address": 40104,
+          "count": 1,
+          "type": "int16",
+          "scale_factor": "Tmp_SF",
+          "unit": "C",
+          "description": "Heat Sink Temperature"
+        },
+        {
+          "name": "TmpTrns",
+          "address": 40105,
+          "count": 1,
+          "type": "int16",
+          "scale_factor": "Tmp_SF",
+          "unit": "C",
+          "description": "Transformer Temperature"
+        },
+        {
+          "name": "TmpOt",
+          "address": 40106,
+          "count": 1,
+          "type": "int16",
+          "scale_factor": "Tmp_SF",
+          "unit": "C",
+          "description": "Other Temperature"
+        },
+        {
+          "name": "Tmp_SF",
+          "address": 40107,
+          "count": 1,
+          "type": "sunssf",
+          "description": "Temperature Scale Factor"
+        },
+        {
+          "name": "St",
+          "address": 40108,
+          "count": 1,
+          "type": "enum16",
+          "description": "Operating State"
+        },
+        {
+          "name": "StVnd",
+          "address": 40109,
+          "count": 1,
+          "type": "enum16",
+          "description": "Vendor Operating State"
+        },
+        {
+          "name": "Evt1",
+          "address": 40110,
+          "count": 2,
+          "type": "bitfield32",
+          "description": "Event Flags 1"
+        },
+        {
+          "name": "Evt2",
+          "address": 40112,
+          "count": 2,
+          "type": "bitfield32",
+          "description": "Event Flags 2"
+        },
+        {
+          "name": "EvtVnd1",
+          "address": 40114,
+          "count": 2,
+          "type": "bitfield32",
+          "description": "Vendor Event Flags 1"
+        },
+        {
+          "name": "EvtVnd2",
+          "address": 40116,
+          "count": 2,
+          "type": "bitfield32",
+          "description": "Vendor Event Flags 2"
+        },
+        {
+          "name": "EvtVnd3",
+          "address": 40118,
+          "count": 2,
+          "type": "bitfield32",
+          "description": "Vendor Event Flags 3"
+        },
+        {
+          "name": "EvtVnd4",
+          "address": 40120,
+          "count": 2,
+          "type": "bitfield32",
+          "description": "Vendor Event Flags 4"
+        }
       ]
     }
   },
-
   "meter": {
     "model_header": {
       "description": "Meter Model Header",
       "registers": [
-        {"name": "Model_ID", "address": 40070, "count": 1, "type": "uint16", "description": "Model type: 201=single, 202=split, 203=three-phase WYE, 204=three-phase DELTA"},
-        {"name": "Model_Length", "address": 40071, "count": 1, "type": "uint16", "description": "Model block length"}
+        {
+          "name": "Model_ID",
+          "address": 40070,
+          "count": 1,
+          "type": "uint16",
+          "description": "Model type: 201=single, 202=split, 203=three-phase WYE, 204=three-phase DELTA"
+        },
+        {
+          "name": "Model_Length",
+          "address": 40071,
+          "count": 1,
+          "type": "uint16",
+          "description": "Model block length"
+        }
       ]
     },
     "model_types": {
@@ -113,69 +499,416 @@
     "measurements_int_sf": {
       "description": "Meter Measurements Block (Integer + Scale Factor)",
       "registers": [
-        {"name": "A", "address": 40072, "count": 1, "type": "int16", "scale_factor": "A_SF", "unit": "A", "description": "Total AC Current"},
-        {"name": "AphA", "address": 40073, "count": 1, "type": "int16", "scale_factor": "A_SF", "unit": "A", "description": "Phase A Current"},
-        {"name": "AphB", "address": 40074, "count": 1, "type": "int16", "scale_factor": "A_SF", "unit": "A", "description": "Phase B Current"},
-        {"name": "AphC", "address": 40075, "count": 1, "type": "int16", "scale_factor": "A_SF", "unit": "A", "description": "Phase C Current"},
-        {"name": "A_SF", "address": 40076, "count": 1, "type": "sunssf", "description": "Current Scale Factor"},
-
-        {"name": "PhV", "address": 40077, "count": 1, "type": "int16", "scale_factor": "V_SF", "unit": "V", "description": "Average Phase Voltage LN"},
-        {"name": "PhVphA", "address": 40078, "count": 1, "type": "int16", "scale_factor": "V_SF", "unit": "V", "description": "Phase A Voltage LN"},
-        {"name": "PhVphB", "address": 40079, "count": 1, "type": "int16", "scale_factor": "V_SF", "unit": "V", "description": "Phase B Voltage LN"},
-        {"name": "PhVphC", "address": 40080, "count": 1, "type": "int16", "scale_factor": "V_SF", "unit": "V", "description": "Phase C Voltage LN"},
-        {"name": "PPV", "address": 40081, "count": 1, "type": "int16", "scale_factor": "V_SF", "unit": "V", "description": "Average Phase Voltage LL"},
-        {"name": "PPVphAB", "address": 40082, "count": 1, "type": "int16", "scale_factor": "V_SF", "unit": "V", "description": "Phase AB Voltage"},
-        {"name": "PPVphBC", "address": 40083, "count": 1, "type": "int16", "scale_factor": "V_SF", "unit": "V", "description": "Phase BC Voltage"},
-        {"name": "PPVphCA", "address": 40084, "count": 1, "type": "int16", "scale_factor": "V_SF", "unit": "V", "description": "Phase CA Voltage"},
-        {"name": "V_SF", "address": 40085, "count": 1, "type": "sunssf", "description": "Voltage Scale Factor"},
-
-        {"name": "Hz", "address": 40086, "count": 1, "type": "int16", "scale_factor": "Hz_SF", "unit": "Hz", "description": "AC Frequency"},
-        {"name": "Hz_SF", "address": 40087, "count": 1, "type": "sunssf", "description": "Frequency Scale Factor"},
-
-        {"name": "W", "address": 40088, "count": 1, "type": "int16", "scale_factor": "W_SF", "unit": "W", "description": "Total Real Power"},
-        {"name": "WphA", "address": 40089, "count": 1, "type": "int16", "scale_factor": "W_SF", "unit": "W", "description": "Phase A Power"},
-        {"name": "WphB", "address": 40090, "count": 1, "type": "int16", "scale_factor": "W_SF", "unit": "W", "description": "Phase B Power"},
-        {"name": "WphC", "address": 40091, "count": 1, "type": "int16", "scale_factor": "W_SF", "unit": "W", "description": "Phase C Power"},
-        {"name": "W_SF", "address": 40092, "count": 1, "type": "sunssf", "description": "Power Scale Factor"},
-
-        {"name": "VA", "address": 40093, "count": 1, "type": "int16", "scale_factor": "VA_SF", "unit": "VA", "description": "Total Apparent Power"},
-        {"name": "VAphA", "address": 40094, "count": 1, "type": "int16", "scale_factor": "VA_SF", "unit": "VA", "description": "Phase A Apparent Power"},
-        {"name": "VAphB", "address": 40095, "count": 1, "type": "int16", "scale_factor": "VA_SF", "unit": "VA", "description": "Phase B Apparent Power"},
-        {"name": "VAphC", "address": 40096, "count": 1, "type": "int16", "scale_factor": "VA_SF", "unit": "VA", "description": "Phase C Apparent Power"},
-        {"name": "VA_SF", "address": 40097, "count": 1, "type": "sunssf", "description": "Apparent Power Scale Factor"},
-
-        {"name": "VAR", "address": 40098, "count": 1, "type": "int16", "scale_factor": "VAR_SF", "unit": "var", "description": "Total Reactive Power"},
-        {"name": "VARphA", "address": 40099, "count": 1, "type": "int16", "scale_factor": "VAR_SF", "unit": "var", "description": "Phase A Reactive Power"},
-        {"name": "VARphB", "address": 40100, "count": 1, "type": "int16", "scale_factor": "VAR_SF", "unit": "var", "description": "Phase B Reactive Power"},
-        {"name": "VARphC", "address": 40101, "count": 1, "type": "int16", "scale_factor": "VAR_SF", "unit": "var", "description": "Phase C Reactive Power"},
-        {"name": "VAR_SF", "address": 40102, "count": 1, "type": "sunssf", "description": "Reactive Power Scale Factor"},
-
-        {"name": "PF", "address": 40103, "count": 1, "type": "int16", "scale_factor": "PF_SF", "unit": "%", "description": "Average Power Factor"},
-        {"name": "PFphA", "address": 40104, "count": 1, "type": "int16", "scale_factor": "PF_SF", "unit": "%", "description": "Phase A Power Factor"},
-        {"name": "PFphB", "address": 40105, "count": 1, "type": "int16", "scale_factor": "PF_SF", "unit": "%", "description": "Phase B Power Factor"},
-        {"name": "PFphC", "address": 40106, "count": 1, "type": "int16", "scale_factor": "PF_SF", "unit": "%", "description": "Phase C Power Factor"},
-        {"name": "PF_SF", "address": 40107, "count": 1, "type": "sunssf", "description": "Power Factor Scale Factor"},
-
-        {"name": "TotWhExp", "address": 40108, "count": 2, "type": "acc32", "scale_factor": "TotWh_SF", "unit": "Wh", "description": "Total Exported Energy"},
-        {"name": "TotWhExpPhA", "address": 40110, "count": 2, "type": "acc32", "scale_factor": "TotWh_SF", "unit": "Wh", "description": "Phase A Exported Energy"},
-        {"name": "TotWhExpPhB", "address": 40112, "count": 2, "type": "acc32", "scale_factor": "TotWh_SF", "unit": "Wh", "description": "Phase B Exported Energy"},
-        {"name": "TotWhExpPhC", "address": 40114, "count": 2, "type": "acc32", "scale_factor": "TotWh_SF", "unit": "Wh", "description": "Phase C Exported Energy"},
-
-        {"name": "TotWhImp", "address": 40116, "count": 2, "type": "acc32", "scale_factor": "TotWh_SF", "unit": "Wh", "description": "Total Imported Energy"},
-        {"name": "TotWhImpPhA", "address": 40118, "count": 2, "type": "acc32", "scale_factor": "TotWh_SF", "unit": "Wh", "description": "Phase A Imported Energy"},
-        {"name": "TotWhImpPhB", "address": 40120, "count": 2, "type": "acc32", "scale_factor": "TotWh_SF", "unit": "Wh", "description": "Phase B Imported Energy"},
-        {"name": "TotWhImpPhC", "address": 40122, "count": 2, "type": "acc32", "scale_factor": "TotWh_SF", "unit": "Wh", "description": "Phase C Imported Energy"},
-        {"name": "TotWh_SF", "address": 40124, "count": 1, "type": "sunssf", "description": "Energy Scale Factor"}
+        {
+          "name": "A",
+          "address": 40072,
+          "count": 1,
+          "type": "int16",
+          "scale_factor": "A_SF",
+          "unit": "A",
+          "description": "Total AC Current"
+        },
+        {
+          "name": "AphA",
+          "address": 40073,
+          "count": 1,
+          "type": "int16",
+          "scale_factor": "A_SF",
+          "unit": "A",
+          "description": "Phase A Current"
+        },
+        {
+          "name": "AphB",
+          "address": 40074,
+          "count": 1,
+          "type": "int16",
+          "scale_factor": "A_SF",
+          "unit": "A",
+          "description": "Phase B Current"
+        },
+        {
+          "name": "AphC",
+          "address": 40075,
+          "count": 1,
+          "type": "int16",
+          "scale_factor": "A_SF",
+          "unit": "A",
+          "description": "Phase C Current"
+        },
+        {
+          "name": "A_SF",
+          "address": 40076,
+          "count": 1,
+          "type": "sunssf",
+          "description": "Current Scale Factor"
+        },
+        {
+          "name": "PhV",
+          "address": 40077,
+          "count": 1,
+          "type": "int16",
+          "scale_factor": "V_SF",
+          "unit": "V",
+          "description": "Average Phase Voltage LN"
+        },
+        {
+          "name": "PhVphA",
+          "address": 40078,
+          "count": 1,
+          "type": "int16",
+          "scale_factor": "V_SF",
+          "unit": "V",
+          "description": "Phase A Voltage LN"
+        },
+        {
+          "name": "PhVphB",
+          "address": 40079,
+          "count": 1,
+          "type": "int16",
+          "scale_factor": "V_SF",
+          "unit": "V",
+          "description": "Phase B Voltage LN"
+        },
+        {
+          "name": "PhVphC",
+          "address": 40080,
+          "count": 1,
+          "type": "int16",
+          "scale_factor": "V_SF",
+          "unit": "V",
+          "description": "Phase C Voltage LN"
+        },
+        {
+          "name": "PPV",
+          "address": 40081,
+          "count": 1,
+          "type": "int16",
+          "scale_factor": "V_SF",
+          "unit": "V",
+          "description": "Average Phase Voltage LL"
+        },
+        {
+          "name": "PPVphAB",
+          "address": 40082,
+          "count": 1,
+          "type": "int16",
+          "scale_factor": "V_SF",
+          "unit": "V",
+          "description": "Phase AB Voltage"
+        },
+        {
+          "name": "PPVphBC",
+          "address": 40083,
+          "count": 1,
+          "type": "int16",
+          "scale_factor": "V_SF",
+          "unit": "V",
+          "description": "Phase BC Voltage"
+        },
+        {
+          "name": "PPVphCA",
+          "address": 40084,
+          "count": 1,
+          "type": "int16",
+          "scale_factor": "V_SF",
+          "unit": "V",
+          "description": "Phase CA Voltage"
+        },
+        {
+          "name": "V_SF",
+          "address": 40085,
+          "count": 1,
+          "type": "sunssf",
+          "description": "Voltage Scale Factor"
+        },
+        {
+          "name": "Hz",
+          "address": 40086,
+          "count": 1,
+          "type": "int16",
+          "scale_factor": "Hz_SF",
+          "unit": "Hz",
+          "description": "AC Frequency"
+        },
+        {
+          "name": "Hz_SF",
+          "address": 40087,
+          "count": 1,
+          "type": "sunssf",
+          "description": "Frequency Scale Factor"
+        },
+        {
+          "name": "W",
+          "address": 40088,
+          "count": 1,
+          "type": "int16",
+          "scale_factor": "W_SF",
+          "unit": "W",
+          "description": "Total Real Power"
+        },
+        {
+          "name": "WphA",
+          "address": 40089,
+          "count": 1,
+          "type": "int16",
+          "scale_factor": "W_SF",
+          "unit": "W",
+          "description": "Phase A Power"
+        },
+        {
+          "name": "WphB",
+          "address": 40090,
+          "count": 1,
+          "type": "int16",
+          "scale_factor": "W_SF",
+          "unit": "W",
+          "description": "Phase B Power"
+        },
+        {
+          "name": "WphC",
+          "address": 40091,
+          "count": 1,
+          "type": "int16",
+          "scale_factor": "W_SF",
+          "unit": "W",
+          "description": "Phase C Power"
+        },
+        {
+          "name": "W_SF",
+          "address": 40092,
+          "count": 1,
+          "type": "sunssf",
+          "description": "Power Scale Factor"
+        },
+        {
+          "name": "VA",
+          "address": 40093,
+          "count": 1,
+          "type": "int16",
+          "scale_factor": "VA_SF",
+          "unit": "VA",
+          "description": "Total Apparent Power"
+        },
+        {
+          "name": "VAphA",
+          "address": 40094,
+          "count": 1,
+          "type": "int16",
+          "scale_factor": "VA_SF",
+          "unit": "VA",
+          "description": "Phase A Apparent Power"
+        },
+        {
+          "name": "VAphB",
+          "address": 40095,
+          "count": 1,
+          "type": "int16",
+          "scale_factor": "VA_SF",
+          "unit": "VA",
+          "description": "Phase B Apparent Power"
+        },
+        {
+          "name": "VAphC",
+          "address": 40096,
+          "count": 1,
+          "type": "int16",
+          "scale_factor": "VA_SF",
+          "unit": "VA",
+          "description": "Phase C Apparent Power"
+        },
+        {
+          "name": "VA_SF",
+          "address": 40097,
+          "count": 1,
+          "type": "sunssf",
+          "description": "Apparent Power Scale Factor"
+        },
+        {
+          "name": "VAR",
+          "address": 40098,
+          "count": 1,
+          "type": "int16",
+          "scale_factor": "VAR_SF",
+          "unit": "var",
+          "description": "Total Reactive Power"
+        },
+        {
+          "name": "VARphA",
+          "address": 40099,
+          "count": 1,
+          "type": "int16",
+          "scale_factor": "VAR_SF",
+          "unit": "var",
+          "description": "Phase A Reactive Power"
+        },
+        {
+          "name": "VARphB",
+          "address": 40100,
+          "count": 1,
+          "type": "int16",
+          "scale_factor": "VAR_SF",
+          "unit": "var",
+          "description": "Phase B Reactive Power"
+        },
+        {
+          "name": "VARphC",
+          "address": 40101,
+          "count": 1,
+          "type": "int16",
+          "scale_factor": "VAR_SF",
+          "unit": "var",
+          "description": "Phase C Reactive Power"
+        },
+        {
+          "name": "VAR_SF",
+          "address": 40102,
+          "count": 1,
+          "type": "sunssf",
+          "description": "Reactive Power Scale Factor"
+        },
+        {
+          "name": "PF",
+          "address": 40103,
+          "count": 1,
+          "type": "int16",
+          "scale_factor": "PF_SF",
+          "unit": "%",
+          "description": "Average Power Factor"
+        },
+        {
+          "name": "PFphA",
+          "address": 40104,
+          "count": 1,
+          "type": "int16",
+          "scale_factor": "PF_SF",
+          "unit": "%",
+          "description": "Phase A Power Factor"
+        },
+        {
+          "name": "PFphB",
+          "address": 40105,
+          "count": 1,
+          "type": "int16",
+          "scale_factor": "PF_SF",
+          "unit": "%",
+          "description": "Phase B Power Factor"
+        },
+        {
+          "name": "PFphC",
+          "address": 40106,
+          "count": 1,
+          "type": "int16",
+          "scale_factor": "PF_SF",
+          "unit": "%",
+          "description": "Phase C Power Factor"
+        },
+        {
+          "name": "PF_SF",
+          "address": 40107,
+          "count": 1,
+          "type": "sunssf",
+          "description": "Power Factor Scale Factor"
+        },
+        {
+          "name": "TotWhExp",
+          "address": 40108,
+          "count": 2,
+          "type": "acc32",
+          "scale_factor": "TotWh_SF",
+          "unit": "Wh",
+          "description": "Total Exported Energy"
+        },
+        {
+          "name": "TotWhExpPhA",
+          "address": 40110,
+          "count": 2,
+          "type": "acc32",
+          "scale_factor": "TotWh_SF",
+          "unit": "Wh",
+          "description": "Phase A Exported Energy"
+        },
+        {
+          "name": "TotWhExpPhB",
+          "address": 40112,
+          "count": 2,
+          "type": "acc32",
+          "scale_factor": "TotWh_SF",
+          "unit": "Wh",
+          "description": "Phase B Exported Energy"
+        },
+        {
+          "name": "TotWhExpPhC",
+          "address": 40114,
+          "count": 2,
+          "type": "acc32",
+          "scale_factor": "TotWh_SF",
+          "unit": "Wh",
+          "description": "Phase C Exported Energy"
+        },
+        {
+          "name": "TotWhImp",
+          "address": 40116,
+          "count": 2,
+          "type": "acc32",
+          "scale_factor": "TotWh_SF",
+          "unit": "Wh",
+          "description": "Total Imported Energy"
+        },
+        {
+          "name": "TotWhImpPhA",
+          "address": 40118,
+          "count": 2,
+          "type": "acc32",
+          "scale_factor": "TotWh_SF",
+          "unit": "Wh",
+          "description": "Phase A Imported Energy"
+        },
+        {
+          "name": "TotWhImpPhB",
+          "address": 40120,
+          "count": 2,
+          "type": "acc32",
+          "scale_factor": "TotWh_SF",
+          "unit": "Wh",
+          "description": "Phase B Imported Energy"
+        },
+        {
+          "name": "TotWhImpPhC",
+          "address": 40122,
+          "count": 2,
+          "type": "acc32",
+          "scale_factor": "TotWh_SF",
+          "unit": "Wh",
+          "description": "Phase C Imported Energy"
+        },
+        {
+          "name": "TotWh_SF",
+          "address": 40124,
+          "count": 1,
+          "type": "sunssf",
+          "description": "Energy Scale Factor"
+        }
       ]
     }
   },
-
   "storage": {
     "model_header": {
       "description": "Storage Model Header (Model 124)",
       "registers": [
-        {"name": "Model_ID", "address": 40341, "count": 1, "type": "uint16", "description": "Model type: 124=Basic Storage Controls"},
-        {"name": "Model_Length", "address": 40342, "count": 1, "type": "uint16", "description": "Model block length (24)"}
+        {
+          "name": "Model_ID",
+          "address": 40341,
+          "count": 1,
+          "type": "uint16",
+          "description": "Model type: 124=Basic Storage Controls"
+        },
+        {
+          "name": "Model_Length",
+          "address": 40342,
+          "count": 1,
+          "type": "uint16",
+          "description": "Model block length (24)"
+        }
       ]
     },
     "model_types": {
@@ -184,42 +917,220 @@
     "measurements": {
       "description": "Storage Measurements Block (Model 124, Int+SF format, starts at 40343)",
       "registers": [
-        {"name": "WChaMax", "address": 40343, "count": 1, "type": "uint16", "scale_factor": "WChaMax_SF", "unit": "W", "description": "Maximum Charge Power"},
-        {"name": "WChaGra", "address": 40344, "count": 1, "type": "uint16", "scale_factor": "WChaDisChaGra_SF", "unit": "% WChaMax/sec", "description": "Charge Ramp Rate"},
-        {"name": "WDisChaGra", "address": 40345, "count": 1, "type": "uint16", "scale_factor": "WChaDisChaGra_SF", "unit": "% WChaMax/sec", "description": "Discharge Ramp Rate"},
-        {"name": "StorCtl_Mod", "address": 40346, "count": 1, "type": "bitfield16", "description": "Storage Control Mode (bit0=Charge, bit1=Discharge)"},
-        {"name": "VAChaMax", "address": 40347, "count": 1, "type": "uint16", "scale_factor": "VAChaMax_SF", "unit": "VA", "description": "Maximum Charging VA"},
-        {"name": "MinRsvPct", "address": 40348, "count": 1, "type": "uint16", "scale_factor": "MinRsvPct_SF", "unit": "% WChaMax", "description": "Minimum Reserve Percentage"},
-        {"name": "ChaState", "address": 40349, "count": 1, "type": "uint16", "scale_factor": "ChaState_SF", "unit": "% AhrRtg", "description": "Charge State Percentage"},
-        {"name": "StorAval", "address": 40350, "count": 1, "type": "uint16", "scale_factor": "StorAval_SF", "unit": "AH", "description": "Available Storage"},
-        {"name": "InBatV", "address": 40351, "count": 1, "type": "uint16", "scale_factor": "InBatV_SF", "unit": "V", "description": "Battery Voltage"},
-        {"name": "ChaSt", "address": 40352, "count": 1, "type": "enum16", "description": "Charge Status (1=OFF,2=EMPTY,3=DISCHARGING,4=CHARGING,5=FULL,6=HOLDING,7=TESTING)"},
-        {"name": "OutWRte", "address": 40353, "count": 1, "type": "int16", "scale_factor": "InOutWRte_SF", "unit": "% WDisChaMax", "description": "Discharge Rate"},
-        {"name": "InWRte", "address": 40354, "count": 1, "type": "int16", "scale_factor": "InOutWRte_SF", "unit": "% WChaMax", "description": "Charge Rate"},
-        {"name": "InOutWRte_WinTms", "address": 40355, "count": 1, "type": "uint16", "unit": "Secs", "description": "Rate Window Time"},
-        {"name": "InOutWRte_RvrtTms", "address": 40356, "count": 1, "type": "uint16", "unit": "Secs", "description": "Rate Revert Time"},
-        {"name": "InOutWRte_RmpTms", "address": 40357, "count": 1, "type": "uint16", "unit": "Secs", "description": "Rate Ramp Time"},
-        {"name": "ChaGriSet", "address": 40358, "count": 1, "type": "enum16", "description": "Charging Grid Setting (0=PV, 1=GRID)"},
-        {"name": "WChaMax_SF", "address": 40359, "count": 1, "type": "sunssf", "description": "Maximum Charge Scale Factor"},
-        {"name": "WChaDisChaGra_SF", "address": 40360, "count": 1, "type": "sunssf", "description": "Ramp Rate Scale Factor"},
-        {"name": "VAChaMax_SF", "address": 40361, "count": 1, "type": "sunssf", "description": "VA Charge Scale Factor"},
-        {"name": "MinRsvPct_SF", "address": 40362, "count": 1, "type": "sunssf", "description": "Reserve Percentage Scale Factor"},
-        {"name": "ChaState_SF", "address": 40363, "count": 1, "type": "sunssf", "description": "Charge State Scale Factor"},
-        {"name": "StorAval_SF", "address": 40364, "count": 1, "type": "sunssf", "description": "Available Storage Scale Factor"},
-        {"name": "InBatV_SF", "address": 40365, "count": 1, "type": "sunssf", "description": "Battery Voltage Scale Factor"},
-        {"name": "InOutWRte_SF", "address": 40366, "count": 1, "type": "sunssf", "description": "Rate Scale Factor"}
+        {
+          "name": "WChaMax",
+          "address": 40343,
+          "count": 1,
+          "type": "uint16",
+          "scale_factor": "WChaMax_SF",
+          "unit": "W",
+          "description": "Maximum Charge Power"
+        },
+        {
+          "name": "WChaGra",
+          "address": 40344,
+          "count": 1,
+          "type": "uint16",
+          "scale_factor": "WChaDisChaGra_SF",
+          "unit": "% WChaMax/sec",
+          "description": "Charge Ramp Rate"
+        },
+        {
+          "name": "WDisChaGra",
+          "address": 40345,
+          "count": 1,
+          "type": "uint16",
+          "scale_factor": "WChaDisChaGra_SF",
+          "unit": "% WChaMax/sec",
+          "description": "Discharge Ramp Rate"
+        },
+        {
+          "name": "StorCtl_Mod",
+          "address": 40346,
+          "count": 1,
+          "type": "bitfield16",
+          "description": "Storage Control Mode (bit0=Charge, bit1=Discharge)"
+        },
+        {
+          "name": "VAChaMax",
+          "address": 40347,
+          "count": 1,
+          "type": "uint16",
+          "scale_factor": "VAChaMax_SF",
+          "unit": "VA",
+          "description": "Maximum Charging VA"
+        },
+        {
+          "name": "MinRsvPct",
+          "address": 40348,
+          "count": 1,
+          "type": "uint16",
+          "scale_factor": "MinRsvPct_SF",
+          "unit": "% WChaMax",
+          "description": "Minimum Reserve Percentage"
+        },
+        {
+          "name": "ChaState",
+          "address": 40349,
+          "count": 1,
+          "type": "uint16",
+          "scale_factor": "ChaState_SF",
+          "unit": "% AhrRtg",
+          "description": "Charge State Percentage"
+        },
+        {
+          "name": "StorAval",
+          "address": 40350,
+          "count": 1,
+          "type": "uint16",
+          "scale_factor": "StorAval_SF",
+          "unit": "AH",
+          "description": "Available Storage"
+        },
+        {
+          "name": "InBatV",
+          "address": 40351,
+          "count": 1,
+          "type": "uint16",
+          "scale_factor": "InBatV_SF",
+          "unit": "V",
+          "description": "Battery Voltage"
+        },
+        {
+          "name": "ChaSt",
+          "address": 40352,
+          "count": 1,
+          "type": "enum16",
+          "description": "Charge Status (1=OFF,2=EMPTY,3=DISCHARGING,4=CHARGING,5=FULL,6=HOLDING,7=TESTING)"
+        },
+        {
+          "name": "OutWRte",
+          "address": 40353,
+          "count": 1,
+          "type": "int16",
+          "scale_factor": "InOutWRte_SF",
+          "unit": "% WDisChaMax",
+          "description": "Discharge Rate"
+        },
+        {
+          "name": "InWRte",
+          "address": 40354,
+          "count": 1,
+          "type": "int16",
+          "scale_factor": "InOutWRte_SF",
+          "unit": "% WChaMax",
+          "description": "Charge Rate"
+        },
+        {
+          "name": "InOutWRte_WinTms",
+          "address": 40355,
+          "count": 1,
+          "type": "uint16",
+          "unit": "Secs",
+          "description": "Rate Window Time"
+        },
+        {
+          "name": "InOutWRte_RvrtTms",
+          "address": 40356,
+          "count": 1,
+          "type": "uint16",
+          "unit": "Secs",
+          "description": "Rate Revert Time"
+        },
+        {
+          "name": "InOutWRte_RmpTms",
+          "address": 40357,
+          "count": 1,
+          "type": "uint16",
+          "unit": "Secs",
+          "description": "Rate Ramp Time"
+        },
+        {
+          "name": "ChaGriSet",
+          "address": 40358,
+          "count": 1,
+          "type": "enum16",
+          "description": "Charging Grid Setting (0=PV, 1=GRID)"
+        },
+        {
+          "name": "WChaMax_SF",
+          "address": 40359,
+          "count": 1,
+          "type": "sunssf",
+          "description": "Maximum Charge Scale Factor"
+        },
+        {
+          "name": "WChaDisChaGra_SF",
+          "address": 40360,
+          "count": 1,
+          "type": "sunssf",
+          "description": "Ramp Rate Scale Factor"
+        },
+        {
+          "name": "VAChaMax_SF",
+          "address": 40361,
+          "count": 1,
+          "type": "sunssf",
+          "description": "VA Charge Scale Factor"
+        },
+        {
+          "name": "MinRsvPct_SF",
+          "address": 40362,
+          "count": 1,
+          "type": "sunssf",
+          "description": "Reserve Percentage Scale Factor"
+        },
+        {
+          "name": "ChaState_SF",
+          "address": 40363,
+          "count": 1,
+          "type": "sunssf",
+          "description": "Charge State Scale Factor"
+        },
+        {
+          "name": "StorAval_SF",
+          "address": 40364,
+          "count": 1,
+          "type": "sunssf",
+          "description": "Available Storage Scale Factor"
+        },
+        {
+          "name": "InBatV_SF",
+          "address": 40365,
+          "count": 1,
+          "type": "sunssf",
+          "description": "Battery Voltage Scale Factor"
+        },
+        {
+          "name": "InOutWRte_SF",
+          "address": 40366,
+          "count": 1,
+          "type": "sunssf",
+          "description": "Rate Scale Factor"
+        }
       ]
     }
   },
-
   "immediate_controls": {
     "model_header": {
       "description": "Immediate Controls Model Header (Model 123)",
       "address": 40228,
       "count": 2,
       "registers": [
-        {"name": "ID", "offset": 0, "count": 1, "type": "uint16", "description": "Model ID (123)"},
-        {"name": "L", "offset": 1, "count": 1, "type": "uint16", "description": "Model Length (24)"}
+        {
+          "name": "ID",
+          "offset": 0,
+          "count": 1,
+          "type": "uint16",
+          "description": "Model ID (123)"
+        },
+        {
+          "name": "L",
+          "offset": 1,
+          "count": 1,
+          "type": "uint16",
+          "description": "Model Length (24)"
+        }
       ]
     },
     "connection": {
@@ -227,9 +1138,29 @@
       "address": 40230,
       "count": 3,
       "registers": [
-        {"name": "Conn_WinTms", "offset": 0, "count": 1, "type": "uint16", "unit": "Secs", "description": "Time window for connect/disconnect"},
-        {"name": "Conn_RvrtTms", "offset": 1, "count": 1, "type": "uint16", "unit": "Secs", "description": "Timeout period for connect/disconnect"},
-        {"name": "Conn", "offset": 2, "count": 1, "type": "bitfield16", "description": "Connection control (0=Disconnected, 1=Connected)"}
+        {
+          "name": "Conn_WinTms",
+          "offset": 0,
+          "count": 1,
+          "type": "uint16",
+          "unit": "Secs",
+          "description": "Time window for connect/disconnect"
+        },
+        {
+          "name": "Conn_RvrtTms",
+          "offset": 1,
+          "count": 1,
+          "type": "uint16",
+          "unit": "Secs",
+          "description": "Timeout period for connect/disconnect"
+        },
+        {
+          "name": "Conn",
+          "offset": 2,
+          "count": 1,
+          "type": "bitfield16",
+          "description": "Connection control (0=Disconnected, 1=Connected)"
+        }
       ]
     },
     "power_limit": {
@@ -237,11 +1168,46 @@
       "address": 40233,
       "count": 5,
       "registers": [
-        {"name": "WMaxLimPct", "offset": 0, "count": 1, "type": "uint16", "scale_factor": "WMaxLimPct_SF", "unit": "% WMax", "description": "Set power output to specified level"},
-        {"name": "WMaxLimPct_WinTms", "offset": 1, "count": 1, "type": "uint16", "unit": "Secs", "description": "Time window for power limit change"},
-        {"name": "WMaxLimPct_RvrtTms", "offset": 2, "count": 1, "type": "uint16", "unit": "Secs", "description": "Timeout period for power limit"},
-        {"name": "WMaxLimPct_RmpTms", "offset": 3, "count": 1, "type": "uint16", "unit": "Secs", "description": "Ramp time for moving to new setpoint"},
-        {"name": "WMaxLim_Ena", "offset": 4, "count": 1, "type": "enum16", "description": "Throttle enable/disable (0=Disabled, 1=Enabled)"}
+        {
+          "name": "WMaxLimPct",
+          "offset": 0,
+          "count": 1,
+          "type": "uint16",
+          "scale_factor": "WMaxLimPct_SF",
+          "unit": "% WMax",
+          "description": "Set power output to specified level"
+        },
+        {
+          "name": "WMaxLimPct_WinTms",
+          "offset": 1,
+          "count": 1,
+          "type": "uint16",
+          "unit": "Secs",
+          "description": "Time window for power limit change"
+        },
+        {
+          "name": "WMaxLimPct_RvrtTms",
+          "offset": 2,
+          "count": 1,
+          "type": "uint16",
+          "unit": "Secs",
+          "description": "Timeout period for power limit"
+        },
+        {
+          "name": "WMaxLimPct_RmpTms",
+          "offset": 3,
+          "count": 1,
+          "type": "uint16",
+          "unit": "Secs",
+          "description": "Ramp time for moving to new setpoint"
+        },
+        {
+          "name": "WMaxLim_Ena",
+          "offset": 4,
+          "count": 1,
+          "type": "enum16",
+          "description": "Throttle enable/disable (0=Disabled, 1=Enabled)"
+        }
       ]
     },
     "power_factor": {
@@ -249,11 +1215,46 @@
       "address": 40238,
       "count": 5,
       "registers": [
-        {"name": "OutPFSet", "offset": 0, "count": 1, "type": "int16", "scale_factor": "OutPFSet_SF", "unit": "cos()", "description": "Set power factor (0.8 to 1.0 and -0.8 to -0.999)"},
-        {"name": "OutPFSet_WinTms", "offset": 1, "count": 1, "type": "uint16", "unit": "Secs", "description": "Time window for power factor change"},
-        {"name": "OutPFSet_RvrtTms", "offset": 2, "count": 1, "type": "uint16", "unit": "Secs", "description": "Timeout period for power factor"},
-        {"name": "OutPFSet_RmpTms", "offset": 3, "count": 1, "type": "uint16", "unit": "Secs", "description": "Ramp time for moving to new setpoint"},
-        {"name": "OutPFSet_Ena", "offset": 4, "count": 1, "type": "enum16", "description": "Fixed power factor enable/disable (0=Disabled, 1=Enabled)"}
+        {
+          "name": "OutPFSet",
+          "offset": 0,
+          "count": 1,
+          "type": "int16",
+          "scale_factor": "OutPFSet_SF",
+          "unit": "cos()",
+          "description": "Set power factor (0.8 to 1.0 and -0.8 to -0.999)"
+        },
+        {
+          "name": "OutPFSet_WinTms",
+          "offset": 1,
+          "count": 1,
+          "type": "uint16",
+          "unit": "Secs",
+          "description": "Time window for power factor change"
+        },
+        {
+          "name": "OutPFSet_RvrtTms",
+          "offset": 2,
+          "count": 1,
+          "type": "uint16",
+          "unit": "Secs",
+          "description": "Timeout period for power factor"
+        },
+        {
+          "name": "OutPFSet_RmpTms",
+          "offset": 3,
+          "count": 1,
+          "type": "uint16",
+          "unit": "Secs",
+          "description": "Ramp time for moving to new setpoint"
+        },
+        {
+          "name": "OutPFSet_Ena",
+          "offset": 4,
+          "count": 1,
+          "type": "enum16",
+          "description": "Fixed power factor enable/disable (0=Disabled, 1=Enabled)"
+        }
       ]
     },
     "reactive_power": {
@@ -261,13 +1262,64 @@
       "address": 40243,
       "count": 7,
       "registers": [
-        {"name": "VArWMaxPct", "offset": 0, "count": 1, "type": "int16", "scale_factor": "VArWMaxPct_SF", "unit": "% WMax", "description": "Reactive power in percent of WMax"},
-        {"name": "VArMaxPct", "offset": 1, "count": 1, "type": "int16", "scale_factor": "VArPct_SF", "unit": "% VArMax", "description": "Reactive power in percent of VArMax"},
-        {"name": "VArAvalPct", "offset": 2, "count": 1, "type": "int16", "scale_factor": "VArPct_SF", "unit": "% VArAval", "description": "Reactive power in percent of VArAval"},
-        {"name": "VArPct_WinTms", "offset": 3, "count": 1, "type": "uint16", "unit": "Secs", "description": "Time window for VAR limit change"},
-        {"name": "VArPct_RvrtTms", "offset": 4, "count": 1, "type": "uint16", "unit": "Secs", "description": "Timeout period for VAR limit"},
-        {"name": "VArPct_RmpTms", "offset": 5, "count": 1, "type": "uint16", "unit": "Secs", "description": "Ramp time for moving to new setpoint"},
-        {"name": "VArPct_Mod", "offset": 6, "count": 1, "type": "enum16", "description": "VAR limit mode (2=VAR limit as % of VArMax)"}
+        {
+          "name": "VArWMaxPct",
+          "offset": 0,
+          "count": 1,
+          "type": "int16",
+          "scale_factor": "VArWMaxPct_SF",
+          "unit": "% WMax",
+          "description": "Reactive power in percent of WMax"
+        },
+        {
+          "name": "VArMaxPct",
+          "offset": 1,
+          "count": 1,
+          "type": "int16",
+          "scale_factor": "VArPct_SF",
+          "unit": "% VArMax",
+          "description": "Reactive power in percent of VArMax"
+        },
+        {
+          "name": "VArAvalPct",
+          "offset": 2,
+          "count": 1,
+          "type": "int16",
+          "scale_factor": "VArPct_SF",
+          "unit": "% VArAval",
+          "description": "Reactive power in percent of VArAval"
+        },
+        {
+          "name": "VArPct_WinTms",
+          "offset": 3,
+          "count": 1,
+          "type": "uint16",
+          "unit": "Secs",
+          "description": "Time window for VAR limit change"
+        },
+        {
+          "name": "VArPct_RvrtTms",
+          "offset": 4,
+          "count": 1,
+          "type": "uint16",
+          "unit": "Secs",
+          "description": "Timeout period for VAR limit"
+        },
+        {
+          "name": "VArPct_RmpTms",
+          "offset": 5,
+          "count": 1,
+          "type": "uint16",
+          "unit": "Secs",
+          "description": "Ramp time for moving to new setpoint"
+        },
+        {
+          "name": "VArPct_Mod",
+          "offset": 6,
+          "count": 1,
+          "type": "enum16",
+          "description": "VAR limit mode (2=VAR limit as % of VArMax)"
+        }
       ]
     },
     "var_enable": {
@@ -275,22 +1327,57 @@
       "address": 40250,
       "count": 4,
       "registers": [
-        {"name": "VArPct_Ena", "offset": 0, "count": 1, "type": "enum16", "description": "Fixed VAR enable/disable (0=Disabled, 1=Enabled)"},
-        {"name": "WMaxLimPct_SF", "offset": 1, "count": 1, "type": "sunssf", "description": "Scale factor for power output percent"},
-        {"name": "OutPFSet_SF", "offset": 2, "count": 1, "type": "sunssf", "description": "Scale factor for power factor"},
-        {"name": "VArPct_SF", "offset": 3, "count": 1, "type": "sunssf", "description": "Scale factor for reactive power"}
+        {
+          "name": "VArPct_Ena",
+          "offset": 0,
+          "count": 1,
+          "type": "enum16",
+          "description": "Fixed VAR enable/disable (0=Disabled, 1=Enabled)"
+        },
+        {
+          "name": "WMaxLimPct_SF",
+          "offset": 1,
+          "count": 1,
+          "type": "sunssf",
+          "description": "Scale factor for power output percent"
+        },
+        {
+          "name": "OutPFSet_SF",
+          "offset": 2,
+          "count": 1,
+          "type": "sunssf",
+          "description": "Scale factor for power factor"
+        },
+        {
+          "name": "VArPct_SF",
+          "offset": 3,
+          "count": 1,
+          "type": "sunssf",
+          "description": "Scale factor for reactive power"
+        }
       ]
     }
   },
-
   "mppt": {
     "model_header": {
       "description": "MPPT Model Header (Model 160)",
       "address": 40254,
       "count": 2,
       "registers": [
-        {"name": "ID", "offset": 0, "count": 1, "type": "uint16", "description": "Model ID (160)"},
-        {"name": "L", "offset": 1, "count": 1, "type": "uint16", "description": "Model Length (48)"}
+        {
+          "name": "ID",
+          "offset": 0,
+          "count": 1,
+          "type": "uint16",
+          "description": "Model ID (160)"
+        },
+        {
+          "name": "L",
+          "offset": 1,
+          "count": 1,
+          "type": "uint16",
+          "description": "Model Length (48)"
+        }
       ]
     },
     "scale_factors": {
@@ -298,10 +1385,34 @@
       "address": 40256,
       "count": 4,
       "registers": [
-        {"name": "DCA_SF", "offset": 0, "count": 1, "type": "sunssf", "description": "DC Current Scale Factor"},
-        {"name": "DCV_SF", "offset": 1, "count": 1, "type": "sunssf", "description": "DC Voltage Scale Factor"},
-        {"name": "DCW_SF", "offset": 2, "count": 1, "type": "sunssf", "description": "DC Power Scale Factor"},
-        {"name": "DCWH_SF", "offset": 3, "count": 1, "type": "sunssf", "description": "DC Energy Scale Factor"}
+        {
+          "name": "DCA_SF",
+          "offset": 0,
+          "count": 1,
+          "type": "sunssf",
+          "description": "DC Current Scale Factor"
+        },
+        {
+          "name": "DCV_SF",
+          "offset": 1,
+          "count": 1,
+          "type": "sunssf",
+          "description": "DC Voltage Scale Factor"
+        },
+        {
+          "name": "DCW_SF",
+          "offset": 2,
+          "count": 1,
+          "type": "sunssf",
+          "description": "DC Power Scale Factor"
+        },
+        {
+          "name": "DCWH_SF",
+          "offset": 3,
+          "count": 1,
+          "type": "sunssf",
+          "description": "DC Energy Scale Factor"
+        }
       ]
     },
     "global": {
@@ -309,9 +1420,28 @@
       "address": 40260,
       "count": 4,
       "registers": [
-        {"name": "Evt", "offset": 0, "count": 2, "type": "bitfield32", "description": "Global MPPT Events"},
-        {"name": "N", "offset": 2, "count": 1, "type": "uint16", "description": "Number of Modules"},
-        {"name": "TmsPer", "offset": 3, "count": 1, "type": "uint16", "unit": "secs", "description": "Timestamp Period"}
+        {
+          "name": "Evt",
+          "offset": 0,
+          "count": 2,
+          "type": "bitfield32",
+          "description": "Global MPPT Events"
+        },
+        {
+          "name": "N",
+          "offset": 2,
+          "count": 1,
+          "type": "uint16",
+          "description": "Number of Modules"
+        },
+        {
+          "name": "TmsPer",
+          "offset": 3,
+          "count": 1,
+          "type": "uint16",
+          "unit": "secs",
+          "description": "Timestamp Period"
+        }
       ]
     },
     "module1": {
@@ -319,16 +1449,86 @@
       "address": 40264,
       "count": 20,
       "registers": [
-        {"name": "ID", "offset": 0, "count": 1, "type": "uint16", "description": "Input ID"},
-        {"name": "IDStr", "offset": 1, "count": 8, "type": "string16", "description": "Input ID String"},
-        {"name": "DCA", "offset": 9, "count": 1, "type": "uint16", "scale_factor": "DCA_SF", "unit": "A", "description": "DC Current"},
-        {"name": "DCV", "offset": 10, "count": 1, "type": "uint16", "scale_factor": "DCV_SF", "unit": "V", "description": "DC Voltage"},
-        {"name": "DCW", "offset": 11, "count": 1, "type": "uint16", "scale_factor": "DCW_SF", "unit": "W", "description": "DC Power"},
-        {"name": "DCWH", "offset": 12, "count": 2, "type": "acc32", "scale_factor": "DCWH_SF", "unit": "Wh", "description": "Lifetime Energy"},
-        {"name": "Tms", "offset": 14, "count": 2, "type": "uint32", "unit": "secs", "description": "Timestamp"},
-        {"name": "Tmp", "offset": 16, "count": 1, "type": "int16", "unit": "C", "description": "Temperature"},
-        {"name": "DCSt", "offset": 17, "count": 1, "type": "enum16", "description": "Operating State"},
-        {"name": "DCEvt", "offset": 18, "count": 2, "type": "bitfield32", "description": "Module Events"}
+        {
+          "name": "ID",
+          "offset": 0,
+          "count": 1,
+          "type": "uint16",
+          "description": "Input ID"
+        },
+        {
+          "name": "IDStr",
+          "offset": 1,
+          "count": 8,
+          "type": "string16",
+          "description": "Input ID String"
+        },
+        {
+          "name": "DCA",
+          "offset": 9,
+          "count": 1,
+          "type": "uint16",
+          "scale_factor": "DCA_SF",
+          "unit": "A",
+          "description": "DC Current"
+        },
+        {
+          "name": "DCV",
+          "offset": 10,
+          "count": 1,
+          "type": "uint16",
+          "scale_factor": "DCV_SF",
+          "unit": "V",
+          "description": "DC Voltage"
+        },
+        {
+          "name": "DCW",
+          "offset": 11,
+          "count": 1,
+          "type": "uint16",
+          "scale_factor": "DCW_SF",
+          "unit": "W",
+          "description": "DC Power"
+        },
+        {
+          "name": "DCWH",
+          "offset": 12,
+          "count": 2,
+          "type": "acc32",
+          "scale_factor": "DCWH_SF",
+          "unit": "Wh",
+          "description": "Lifetime Energy"
+        },
+        {
+          "name": "Tms",
+          "offset": 14,
+          "count": 2,
+          "type": "uint32",
+          "unit": "secs",
+          "description": "Timestamp"
+        },
+        {
+          "name": "Tmp",
+          "offset": 16,
+          "count": 1,
+          "type": "int16",
+          "unit": "C",
+          "description": "Temperature"
+        },
+        {
+          "name": "DCSt",
+          "offset": 17,
+          "count": 1,
+          "type": "enum16",
+          "description": "Operating State"
+        },
+        {
+          "name": "DCEvt",
+          "offset": 18,
+          "count": 2,
+          "type": "bitfield32",
+          "description": "Module Events"
+        }
       ]
     },
     "module2": {
@@ -336,41 +1536,298 @@
       "address": 40284,
       "count": 20,
       "registers": [
-        {"name": "ID", "offset": 0, "count": 1, "type": "uint16", "description": "Input ID"},
-        {"name": "IDStr", "offset": 1, "count": 8, "type": "string16", "description": "Input ID String"},
-        {"name": "DCA", "offset": 9, "count": 1, "type": "uint16", "scale_factor": "DCA_SF", "unit": "A", "description": "DC Current"},
-        {"name": "DCV", "offset": 10, "count": 1, "type": "uint16", "scale_factor": "DCV_SF", "unit": "V", "description": "DC Voltage"},
-        {"name": "DCW", "offset": 11, "count": 1, "type": "uint16", "scale_factor": "DCW_SF", "unit": "W", "description": "DC Power"},
-        {"name": "DCWH", "offset": 12, "count": 2, "type": "acc32", "scale_factor": "DCWH_SF", "unit": "Wh", "description": "Lifetime Energy"},
-        {"name": "Tms", "offset": 14, "count": 2, "type": "uint32", "unit": "secs", "description": "Timestamp"},
-        {"name": "Tmp", "offset": 16, "count": 1, "type": "int16", "unit": "C", "description": "Temperature"},
-        {"name": "DCSt", "offset": 17, "count": 1, "type": "enum16", "description": "Operating State"},
-        {"name": "DCEvt", "offset": 18, "count": 2, "type": "bitfield32", "description": "Module Events"}
+        {
+          "name": "ID",
+          "offset": 0,
+          "count": 1,
+          "type": "uint16",
+          "description": "Input ID"
+        },
+        {
+          "name": "IDStr",
+          "offset": 1,
+          "count": 8,
+          "type": "string16",
+          "description": "Input ID String"
+        },
+        {
+          "name": "DCA",
+          "offset": 9,
+          "count": 1,
+          "type": "uint16",
+          "scale_factor": "DCA_SF",
+          "unit": "A",
+          "description": "DC Current"
+        },
+        {
+          "name": "DCV",
+          "offset": 10,
+          "count": 1,
+          "type": "uint16",
+          "scale_factor": "DCV_SF",
+          "unit": "V",
+          "description": "DC Voltage"
+        },
+        {
+          "name": "DCW",
+          "offset": 11,
+          "count": 1,
+          "type": "uint16",
+          "scale_factor": "DCW_SF",
+          "unit": "W",
+          "description": "DC Power"
+        },
+        {
+          "name": "DCWH",
+          "offset": 12,
+          "count": 2,
+          "type": "acc32",
+          "scale_factor": "DCWH_SF",
+          "unit": "Wh",
+          "description": "Lifetime Energy"
+        },
+        {
+          "name": "Tms",
+          "offset": 14,
+          "count": 2,
+          "type": "uint32",
+          "unit": "secs",
+          "description": "Timestamp"
+        },
+        {
+          "name": "Tmp",
+          "offset": 16,
+          "count": 1,
+          "type": "int16",
+          "unit": "C",
+          "description": "Temperature"
+        },
+        {
+          "name": "DCSt",
+          "offset": 17,
+          "count": 1,
+          "type": "enum16",
+          "description": "Operating State"
+        },
+        {
+          "name": "DCEvt",
+          "offset": 18,
+          "count": 2,
+          "type": "bitfield32",
+          "description": "Module Events"
+        }
       ]
     },
     "model_types": {
       "160": "Multiple MPPT Inverter Extension Model"
     }
   },
-
   "status_codes": {
     "St": {
-      "1": {"name": "I_STATUS_OFF", "description": "Off", "alarm": false},
-      "2": {"name": "I_STATUS_SLEEPING", "description": "Sleeping (auto-shutdown)", "alarm": false},
-      "3": {"name": "I_STATUS_STARTING", "description": "Starting up", "alarm": false},
-      "4": {"name": "I_STATUS_MPPT", "description": "Tracking power point", "alarm": false},
-      "5": {"name": "I_STATUS_THROTTLED", "description": "Forced power reduction", "alarm": true},
-      "6": {"name": "I_STATUS_SHUTTING_DOWN", "description": "Shutting down", "alarm": false},
-      "7": {"name": "I_STATUS_FAULT", "description": "One or more faults exist", "alarm": true},
-      "8": {"name": "I_STATUS_STANDBY", "description": "Standby", "alarm": false},
-      "9": {"name": "I_STATUS_NO_BUSINIT", "description": "No SolarNet communication", "alarm": true},
-      "10": {"name": "I_STATUS_NO_COMM_INV", "description": "No communication with inverter", "alarm": true},
-      "11": {"name": "I_STATUS_SN_OVERCURRENT", "description": "Overcurrent on SolarNet plug", "alarm": true},
-      "12": {"name": "I_STATUS_BOOTLOAD", "description": "Inverter is being updated", "alarm": false},
-      "13": {"name": "I_STATUS_AFCI", "description": "AFCI Event", "alarm": true}
+      "1": {
+        "name": "I_STATUS_OFF",
+        "description": "Off",
+        "alarm": false
+      },
+      "2": {
+        "name": "I_STATUS_SLEEPING",
+        "description": "Sleeping (auto-shutdown)",
+        "alarm": false
+      },
+      "3": {
+        "name": "I_STATUS_STARTING",
+        "description": "Starting up",
+        "alarm": false
+      },
+      "4": {
+        "name": "I_STATUS_MPPT",
+        "description": "Tracking power point",
+        "alarm": false
+      },
+      "5": {
+        "name": "I_STATUS_THROTTLED",
+        "description": "Forced power reduction",
+        "alarm": true
+      },
+      "6": {
+        "name": "I_STATUS_SHUTTING_DOWN",
+        "description": "Shutting down",
+        "alarm": false
+      },
+      "7": {
+        "name": "I_STATUS_FAULT",
+        "description": "One or more faults exist",
+        "alarm": true
+      },
+      "8": {
+        "name": "I_STATUS_STANDBY",
+        "description": "Standby",
+        "alarm": false
+      },
+      "9": {
+        "name": "I_STATUS_NO_BUSINIT",
+        "description": "No SolarNet communication",
+        "alarm": true
+      },
+      "10": {
+        "name": "I_STATUS_NO_COMM_INV",
+        "description": "No communication with inverter",
+        "alarm": true
+      },
+      "11": {
+        "name": "I_STATUS_SN_OVERCURRENT",
+        "description": "Overcurrent on SolarNet plug",
+        "alarm": true
+      },
+      "12": {
+        "name": "I_STATUS_BOOTLOAD",
+        "description": "Inverter is being updated",
+        "alarm": false
+      },
+      "13": {
+        "name": "I_STATUS_AFCI",
+        "description": "AFCI Event",
+        "alarm": true
+      }
+    },
+    "StVnd": {
+      "0": {
+        "name": "NO_ERROR",
+        "description": "No error",
+        "alarm": false
+      },
+      "102": {
+        "name": "AC_VOLT_HIGH",
+        "description": "AC voltage too high",
+        "alarm": true
+      },
+      "103": {
+        "name": "AC_VOLT_LOW",
+        "description": "AC voltage too low",
+        "alarm": true
+      },
+      "104": {
+        "name": "AC_FREQ_HIGH",
+        "description": "AC frequency too high",
+        "alarm": true
+      },
+      "105": {
+        "name": "AC_FREQ_LOW",
+        "description": "AC frequency too low",
+        "alarm": true
+      },
+      "106": {
+        "name": "AC_IMPEDANCE",
+        "description": "AC grid impedance too high",
+        "alarm": true
+      },
+      "107": {
+        "name": "OVER_TEMP",
+        "description": "Over temperature",
+        "alarm": true
+      },
+      "108": {
+        "name": "PF_LOW",
+        "description": "Power factor too low",
+        "alarm": true
+      },
+      "301": {
+        "name": "DERATING_TEMP",
+        "description": "Power derating \u2014 over temperature",
+        "alarm": false
+      },
+      "302": {
+        "name": "DERATING_VOLT",
+        "description": "Power derating \u2014 voltage",
+        "alarm": false
+      },
+      "303": {
+        "name": "DERATING_FREQ",
+        "description": "Power derating \u2014 frequency",
+        "alarm": false
+      },
+      "304": {
+        "name": "GRID_FAILURE",
+        "description": "Grid connection failure",
+        "alarm": true
+      },
+      "305": {
+        "name": "GROUND_FAULT",
+        "description": "Ground fault detected",
+        "alarm": true
+      },
+      "306": {
+        "name": "POWER_LOW",
+        "description": "Power low",
+        "alarm": false
+      },
+      "307": {
+        "name": "DERATING_CONSUMPTION",
+        "description": "Power derating \u2014 consumption",
+        "alarm": false
+      },
+      "401": {
+        "name": "DC_OVERCURRENT",
+        "description": "DC overcurrent",
+        "alarm": true
+      },
+      "402": {
+        "name": "DC_OVERVOLT",
+        "description": "DC overvoltage",
+        "alarm": true
+      },
+      "403": {
+        "name": "DC_OVERTEMP",
+        "description": "DC overtemperature",
+        "alarm": true
+      },
+      "475": {
+        "name": "ISOLATION_ERROR",
+        "description": "Isolation resistance too low (insulation fault on PV string)",
+        "alarm": true
+      },
+      "476": {
+        "name": "RCMU",
+        "description": "Residual current monitoring unit fault",
+        "alarm": true
+      },
+      "501": {
+        "name": "GRID_OVERVOLT_SLOW",
+        "description": "Grid overvoltage (slow)",
+        "alarm": true
+      },
+      "502": {
+        "name": "GRID_UNDERVOLT_SLOW",
+        "description": "Grid undervoltage (slow)",
+        "alarm": true
+      },
+      "509": {
+        "name": "GRID_RECONNECT_DELAY",
+        "description": "Grid reconnection delay active",
+        "alarm": false
+      },
+      "510": {
+        "name": "GRID_FREQ_OUT_RANGE",
+        "description": "Grid frequency out of range",
+        "alarm": true
+      },
+      "601": {
+        "name": "HW_FAULT_INTERNAL",
+        "description": "Internal hardware fault",
+        "alarm": true
+      },
+      "701": {
+        "name": "GROUND_FAULT_HW",
+        "description": "Ground fault hardware error",
+        "alarm": true
+      },
+      "801": {
+        "name": "INTERNAL_ERROR",
+        "description": "Internal software error",
+        "alarm": true
+      }
     }
   },
-
   "state_codes": {
     "102": "AC voltage too high",
     "103": "AC voltage too low",

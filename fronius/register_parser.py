@@ -472,6 +472,21 @@ class RegisterParser:
 
         return events
 
+    def parse_vendor_status(self, vendor_code: int) -> tuple[str, str]:
+        """Parse Fronius vendor status code to name + description.
+
+        Uses StVnd mapping from registers.json (Fronius-specific codes like 475).
+        Returns ('name', 'description') or ('UNKNOWN', 'Unknown vendor code NNN').
+        """
+        stvnd = self.status_codes.get('StVnd', {})
+        code_str = str(vendor_code)
+        if code_str in stvnd:
+            info = stvnd[code_str]
+            return info.get('name', 'UNKNOWN'), info.get('description', '')
+        if vendor_code == 0:
+            return 'NO_ERROR', 'No error'
+        return 'UNKNOWN', f'Unknown vendor code {vendor_code}'
+
     def parse_status(self, status_value: int) -> Dict:
         """
         Parse operating status code to human-readable format.

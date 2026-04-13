@@ -703,8 +703,12 @@ class DevicePoller(threading.Thread):
         data['model'] = device_info.get('model', '')
         data['manufacturer'] = device_info.get('manufacturer', '')
 
-        # Parse status
+        # Parse status + vendor status (e.g., Fronius 475 = Isolation Error)
         data['status'] = self.parser.parse_status(data.get('status_code', 0))
+        vendor_code = data.get('status_vendor', 0)
+        data['status']['vendor_code'] = vendor_code
+        data['status']['vendor_name'], data['status']['vendor_description'] = \
+            self.parser.parse_vendor_status(vendor_code)
         data['is_active'] = data.get('status_code', 0) in self.ACTIVE_STATUS_CODES
 
         # Parse events

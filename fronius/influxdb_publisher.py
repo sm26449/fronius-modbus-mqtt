@@ -365,6 +365,13 @@ class InfluxDBPublisher:
             if 'status' in data:
                 point = point.field("status_code", int(data['status'].get('code', 0)))
                 point = point.field("status_alarm", data['status'].get('alarm', False))
+                # Vendor status code + description (e.g., Fronius 475 = Isolation Error)
+                vendor_code = data['status'].get('vendor_code')
+                if vendor_code is not None and vendor_code != 0:
+                    point = point.field("status_vendor", int(vendor_code))
+                    vendor_name = data['status'].get('vendor_name', '')
+                    if vendor_name and vendor_name != 'NO_ERROR':
+                        point = point.field("status_vendor_name", str(vendor_name))
 
             # Event count + detailed codes (JSON string for InfluxDB)
             if 'events' in data:
