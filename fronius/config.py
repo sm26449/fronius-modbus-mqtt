@@ -137,6 +137,9 @@ class MQTTConfig:
     retain: bool = True
     qos: int = 0
     ha_discovery_enabled: bool = False  # Home Assistant MQTT autodiscovery
+    # Write control (opt-in — allows MQTT commands to write Modbus registers)
+    write_enabled: bool = False         # Must be True to accept write commands
+    write_command_prefix: str = "cmd"   # Topic: {prefix}/inverter/{id}/cmd/{command}
     # TLS settings (optional)
     tls_enabled: bool = False
     tls_ca_certs: str = ""      # Path to CA certificate file
@@ -354,6 +357,8 @@ class ConfigLoader:
             tls_certfile=_env_get('MQTT_TLS_CERTFILE', mq.get('tls_certfile', '')),
             tls_keyfile=_env_get('MQTT_TLS_KEYFILE', mq.get('tls_keyfile', '')),
             tls_insecure=_env_get('MQTT_TLS_INSECURE', mq.get('tls_insecure', False), bool),
+            write_enabled=_env_get('MQTT_WRITE_ENABLED', mq.get('write_enabled', False), bool),
+            write_command_prefix=_env_get('MQTT_WRITE_CMD_PREFIX', mq.get('write_command_prefix', 'cmd')),
         )
 
         # Parse debug settings
