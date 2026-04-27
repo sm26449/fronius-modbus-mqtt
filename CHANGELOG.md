@@ -33,6 +33,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Disabled by default — must explicitly set `write.enabled: true`
   - New configuration section: `write:` with `enabled`, `min_power_limit_pct`, `max_power_limit_pct`, `rate_limit_seconds`, `auto_revert_seconds`, `stabilization_delay`
   - Environment variable overrides: `WRITE_ENABLED`, `WRITE_MIN_POWER_LIMIT`, `WRITE_MAX_POWER_LIMIT`, `WRITE_RATE_LIMIT`, `WRITE_AUTO_REVERT`, `WRITE_STABILIZATION_DELAY`
+- **Built-in HTTP Monitoring Dashboard**
+  - FastAPI server running as daemon thread (uvicorn) — auto-dies on process exit
+  - `GET /` → HTML dashboard with dark theme, CSS grid layout, auto-refresh 30s
+  - `GET /?view=json` → JSON API with full runtime state for programmatic access
+  - Status cards: Modbus TCP, MQTT, InfluxDB, Modbus Write, System (memory, threads)
+  - Devices table with model, serial number, online/offline status, last seen, error count
+  - Scrollable log viewer (last 24h, newest first, max 500 lines from log file)
+  - Green/red status dots for connection indicators
+  - Enabled via `MONITORING_ENABLED=true` env var, default port 8080
+  - New `MonitoringConfig` dataclass with validation
+  - Dependencies: `fastapi`, `uvicorn`, `psutil`
 - **Vendor Status Code Persistence to InfluxDB**
   - `vendor_status_code` (int) and `vendor_status_description` (string) fields in `fronius_inverter` measurement
   - Decoded from Fronius vendor event register (evt_vnd1) using FroniusEventFlags.json
@@ -530,7 +541,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 | Version | Date | Highlights |
 |---------|------|------------|
-| 1.6.0 | 2026-04-27 | Power limit control via MQTT, vendor status to InfluxDB, shutdown safety, float fixes |
+| 1.6.0 | 2026-04-27 | HTTP monitoring dashboard, power limit control, vendor status, shutdown safety |
 | 1.5.0 | 2026-03-05 | Buffer corruption detection, night inverter skip, debug system, 2× audit hardening |
 | 1.4.1 | 2026-02-26 | Storage InfluxDB, MPPT temp, thread safety, HA discovery expansion |
 | 1.4.0 | 2026-02-26 | Resilient reconnection, data loss prevention, graceful shutdown |
