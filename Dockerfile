@@ -37,5 +37,7 @@ RUN chmod +x /entrypoint.sh
 HEALTHCHECK --interval=60s --timeout=10s --start-period=300s --retries=3 \
     CMD python /app/healthcheck.py || exit 1
 
+EXPOSE 8080
+
 ENTRYPOINT ["/entrypoint.sh"]
 CMD ["python", "fronius_modbus_mqtt.py"]

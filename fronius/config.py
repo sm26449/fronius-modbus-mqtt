@@ -96,6 +96,16 @@ class WriteConfig:
 
 
 @dataclass
+class MonitoringConfig:
+    """Built-in HTTP monitoring server settings."""
+    enabled: bool = False
+    port: int = 8080
+
+    def __post_init__(self):
+        _validate_range(self.port, "monitoring.port", 1, 65535)
+
+
+@dataclass
 class DebugConfig:
     """Diagnostic and data validation settings for buffer corruption detection."""
     validate_data: bool = True             # Enable buffer corruption detection + reconciliation
@@ -256,6 +266,7 @@ class ConfigLoader:
         self.influxdb: InfluxDBConfig = None
         self.debug: DebugConfig = None
         self.write: WriteConfig = None
+        self.monitoring: MonitoringConfig = None
         self._load_config(config_path)
 
     @classmethod
@@ -402,6 +413,13 @@ class ConfigLoader:
             auto_revert_seconds=_env_get('WRITE_AUTO_REVERT', wr.get('auto_revert_seconds', 3600), int),
             stabilization_delay=_env_get('WRITE_STABILIZATION_DELAY', wr.get('stabilization_delay', 2.0), float),
             command_topic_suffix=_env_get('WRITE_COMMAND_TOPIC', wr.get('command_topic_suffix', 'cmd')),
+        )
+
+        # Parse monitoring settings
+        mon = self.config.get('monitoring', {})
+        self.monitoring = MonitoringConfig(
+            enabled=_env_get('MONITORING_ENABLED', mon.get('enabled', False), bool),
+            port=_env_get('MONITORING_PORT', mon.get('port', 8080), int),
         )
 
         # Parse InfluxDB settings

@@ -81,6 +81,15 @@ influxdb:
 #   auto_revert_seconds: 3600     # Auto-restore 100% after 1h (0=disabled)
 #   stabilization_delay: 2.0      # Wait after write before next read (DataManager needs time)
 
+# Monitoring HTTP Server (Optional)
+# ----------------------------------
+# Built-in HTTP dashboard for runtime observability.
+# GET / → HTML dashboard (auto-refresh 30s)
+# GET /?view=json → JSON API for programmatic access
+# monitoring:
+#   enabled: false
+#   port: 8080
+
 # Debug & Data Validation
 # -----------------------
 # DataManager buffer corruption detection and diagnostic logging.

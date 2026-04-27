@@ -21,6 +21,7 @@ Python application that reads data from Fronius inverters and smart meters via M
 - **Connection Resilience** - Persistent reconnection monitoring, proactive health checks, data loss prevention
 - **Diagnostic Debug System** - Configurable logging for register values, scale factors, status transitions, and corruption events
 - **Security Hardened** - Non-root container, optional TLS/SSL, secret masking in logs
+- **Monitoring Dashboard** - Built-in HTTP server with dark-theme HTML dashboard and JSON API
 - **Publish Modes** - Publish on change or publish all values
 - **Docker Support** - Separate containers for inverters and meters
 - **MQTT Integration** - Publish to any MQTT broker with configurable topics and LWT
@@ -248,6 +249,31 @@ mosquitto_pub -h broker -t 'fronius/inverter/1/cmd/restore_power_limit' -m '{}'
 - Shutdown restore: all active limits restored to 100% on graceful shutdown
 - Clean restore: `WMaxLim_Ena` set to 0 when restoring to 100% (prevents inverter staying in THROTTLED status)
 
+### Monitoring Dashboard
+
+Built-in HTTP server for runtime observability. Provides an HTML dashboard with auto-refresh and a JSON API for programmatic access.
+
+```yaml
+monitoring:
+  enabled: true
+  port: 8080
+```
+
+**Endpoints:**
+- `GET /` — HTML dashboard (auto-refresh 30s)
+- `GET /?view=json` — JSON API with all runtime state
+
+**Docker port mapping:**
+```yaml
+ports:
+  - "8082:8080"    # inverters
+  - "8083:8080"    # meter
+environment:
+  - MONITORING_ENABLED=true
+```
+
+![Monitoring Dashboard](docs/monitoring-dashboard.png)
+
 ### Debug & Data Validation
 
 ```yaml
@@ -335,6 +361,9 @@ Configuration can also be set via environment variables (useful for Docker):
 | `WRITE_RATE_LIMIT` | Min seconds between writes per device | `30` |
 | `WRITE_AUTO_REVERT` | Auto-restore 100% after N seconds (0=disabled) | `3600` |
 | `WRITE_STABILIZATION_DELAY` | Wait after write before next read (s) | `2.0` |
+| **Monitoring** | | |
+| `MONITORING_ENABLED` | Enable built-in HTTP monitoring server | `false` |
+| `MONITORING_PORT` | Monitoring server port (inside container) | `8080` |
 
 ## Command Line Options
 
@@ -527,6 +556,7 @@ fronius-modbus-mqtt/
 │   ├── register_parser.py      # SunSpec register parsing
 │   ├── mqtt_publisher.py       # MQTT publishing with change detection
 │   ├── influxdb_publisher.py   # InfluxDB writer with batching
+│   ├── monitoring.py           # Built-in HTTP monitoring server
 │   ├── device_cache.py         # Persistent device cache
 │   └── logging_setup.py        # Logging configuration
 ├── config/

@@ -13,6 +13,7 @@ from .register_parser import RegisterParser
 from .modbus_client import FroniusModbusClient
 from .mqtt_publisher import MQTTPublisher
 from .influxdb_publisher import InfluxDBPublisher
+from .monitoring import MonitoringServer
 
 __all__ = [
     "__version__",
@@ -24,4 +25,5 @@ __all__ = [
     "FroniusModbusClient",
     "MQTTPublisher",
     "InfluxDBPublisher",
+    "MonitoringServer",
 ]

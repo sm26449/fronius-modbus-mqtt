@@ -75,6 +75,7 @@ class FroniusModbusMQTT:
         self.modbus_client = None
         self.mqtt_publisher = None
         self.influxdb_publisher = None
+        self.monitoring_server = None
 
         # Setup signal handlers
         signal.signal(signal.SIGINT, self._signal_handler)
@@ -427,6 +428,12 @@ class FroniusModbusMQTT:
 
         # Start device polling threads (they publish directly via callback)
         self.modbus_client.start_polling()
+
+        # Start monitoring HTTP server if enabled
+        if self.config.monitoring and self.config.monitoring.enabled:
+            from fronius.monitoring import MonitoringServer
+            self.monitoring_server = MonitoringServer(self, port=self.config.monitoring.port)
+            self.monitoring_server.start()
 
         # Main loop just keeps the app running
         self.running = True
