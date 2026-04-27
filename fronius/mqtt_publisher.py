@@ -382,11 +382,6 @@ class MQTTPublisher:
                     self.client.publish(status_topic, "online", qos=1, retain=True)
                 except Exception:
                     pass
-                # Subscribe to command topics if write enabled
-                if self.config.write_enabled:
-                    cmd_topic = f"{self.config.topic_prefix}/inverter/+/{self.config.write_command_prefix}/#"
-                    self.client.subscribe(cmd_topic, qos=1)
-                    self.log.info(f"MQTT subscribed to command topic: {cmd_topic}")
             else:
                 self.connected = False
                 self.log.error(f"MQTT connection failed: {reason_code}")
@@ -398,71 +393,6 @@ class MQTTPublisher:
         self.connected = False
         if reason_code != 0:
             self.log.warning(f"MQTT disconnected unexpectedly: {reason_code}")
-
-    # ── Write Command Handling ──
-
-    _write_callback = None  # Set by main app
-
-    def set_write_callback(self, callback):
-        """Set callback for write commands: callback(device_id: int, command: str, payload: dict) -> dict"""
-        self._write_callback = callback
-        # Register message handler + subscribe
-        if self.client and self.config.write_enabled:
-            self.client.on_message = self._on_command_message
-            cmd_topic = f"{self.config.topic_prefix}/inverter/+/{self.config.write_command_prefix}/#"
-            self.client.subscribe(cmd_topic, qos=1)
-            self.log.info(f"Write commands enabled — subscribed to {cmd_topic}")
-
-    def _on_command_message(self, client, userdata, msg):
-        """Handle incoming MQTT write commands."""
-        try:
-            topic = msg.topic
-            # Parse: fronius/inverter/{device_id}/cmd/{command}
-            parts = topic.split('/')
-            # Find cmd position
-            cmd_prefix = self.config.write_command_prefix
-            if cmd_prefix not in parts:
-                return
-            cmd_idx = parts.index(cmd_prefix)
-            if cmd_idx < 2 or cmd_idx + 1 >= len(parts):
-                return
-
-            device_id = int(parts[cmd_idx - 1])
-            command = parts[cmd_idx + 1]
-
-            # Ignore result messages (prevent infinite loop)
-            if command == 'result':
-                return
-
-            # Parse payload (JSON or plain value)
-            raw = msg.payload.decode('utf-8', errors='replace').strip()
-            try:
-                import json
-                payload = json.loads(raw)
-                if isinstance(payload, (int, float)):
-                    payload = {'value': payload}
-            except (json.JSONDecodeError, ValueError):
-                try:
-                    payload = {'value': float(raw)}
-                except ValueError:
-                    payload = {'value': raw}
-
-            self.log.info(f"Command received: inverter {device_id} / {command} = {payload}")
-
-            # Execute via callback
-            if self._write_callback:
-                result = self._write_callback(device_id, command, payload)
-            else:
-                result = {'success': False, 'message': 'No write handler registered'}
-
-            # Publish result
-            result_topic = f"{self.config.topic_prefix}/inverter/{device_id}/{cmd_prefix}/result"
-            import json
-            self.client.publish(result_topic, json.dumps(result), qos=1, retain=False)
-            self.log.info(f"Command result: {result}")
-
-        except Exception as e:
-            self.log.error(f"Command handler error: {e}")
 
     def _try_connect(self) -> bool:
         """

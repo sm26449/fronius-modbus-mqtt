@@ -192,35 +192,7 @@ class FroniusModbusMQTT:
 
         # Publish online status
         self.mqtt_publisher.publish_status("online")
-
-        # Wire write command callback if write_enabled
-        if self.config.mqtt.write_enabled:
-            self.mqtt_publisher.set_write_callback(self._handle_write_command)
-            self.log.info("Modbus WRITE commands enabled via MQTT")
-
         return True
-
-    def _handle_write_command(self, device_id: int, command: str, payload: dict) -> dict:
-        """Handle write command from MQTT → Modbus."""
-        self.log.info(f"Write command: inverter {device_id}, {command}, payload={payload}")
-
-        poller = self.modbus_client.device_poller if self.modbus_client else None
-        if not poller:
-            return {'success': False, 'message': 'Device poller not initialized'}
-
-        if command == 'set_power_limit':
-            value = payload.get('value')
-            if value is None:
-                return {'success': False, 'message': 'Missing "value" in payload'}
-            revert = int(payload.get('revert_time_s', 3600))
-            ramp = int(payload.get('ramp_time_s', 5))
-            return poller.write_power_limit(device_id, float(value), revert, ramp)
-
-        elif command == 'restore_power_limit':
-            return poller.restore_power_limit(device_id)
-
-        else:
-            return {'success': False, 'message': f'Unknown command: {command}'}
 
     def _init_influxdb(self) -> bool:
         """Initialize InfluxDB publisher"""

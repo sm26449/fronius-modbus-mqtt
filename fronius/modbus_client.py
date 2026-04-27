@@ -195,57 +195,6 @@ class ModbusConnection:
             self.failed_reads += 1
             return None
 
-    def write_registers(self, address: int, values: List[int], unit_id: int) -> bool:
-        """Write holding registers with thread-safe access and retry."""
-        with self.lock:
-            # Force connection reset before write (clear DataManager buffer)
-            if self.client and self.connected:
-                self.client.close()
-                self.connected = False
-            time.sleep(0.3)
-
-            for attempt in range(self.config.retry_attempts):
-                try:
-                    if not self.connected or not self.client.is_socket_open():
-                        if self.client:
-                            try:
-                                self.client.close()
-                            except Exception:
-                                pass
-                        self.client = ModbusTcpClient(
-                            host=self.config.host,
-                            port=self.config.port,
-                            timeout=self.config.timeout
-                        )
-                        self.connected = self.client.connect()
-                        if not self.connected:
-                            time.sleep(0.1)
-                            continue
-
-                    result = self.client.write_registers(
-                        address=address - 1,  # pymodbus is 0-indexed
-                        values=values,
-                        device_id=unit_id
-                    )
-
-                    if not result.isError():
-                        self.last_unit_id = unit_id
-                        self.log.info(f"Unit {unit_id}: wrote {values} to register {address}")
-                        return True
-                    else:
-                        self.log.warning(f"Unit {unit_id}: write error at {address}: {result}")
-                        if attempt < self.config.retry_attempts - 1:
-                            time.sleep(self.config.retry_delay)
-
-                except Exception as e:
-                    self.log.warning(f"Unit {unit_id}: write exception at {address}: {e}")
-                    self.connected = False
-                    if attempt < self.config.retry_attempts - 1:
-                        time.sleep(self.config.retry_delay)
-
-            self.log.error(f"Unit {unit_id}: write FAILED at {address} after {self.config.retry_attempts} attempts")
-            return False
-
     def identify_device(self, unit_id: int) -> Optional[Dict]:
         """Identify a device by reading SunSpec registers."""
         regs = self.read_registers(40001, 69, unit_id)
@@ -794,7 +743,6 @@ class DevicePoller(threading.Thread):
             controls_data = self._read_immediate_controls(unit_id)
             if controls_data:
                 data['controls'] = controls_data
-                self._controls_cache[unit_id] = controls_data  # cache for write_power_limit
                 self._last_controls_read[unit_id] = now
                 self.log.debug(f"Inverter {unit_id}: Controls - "
                               f"Conn={controls_data.get('connected')}, "
@@ -1078,99 +1026,10 @@ class DevicePoller(threading.Thread):
             '_sf_var': sf_var
         }
 
-    # ── Write Methods (Model 123 — Immediate Controls) ──
-
-    _controls_cache: Dict[int, Dict] = {}  # unit_id → last controls read
-    _last_write_time: Dict[int, float] = {}  # unit_id → timestamp
-    WRITE_RATE_LIMIT_SEC = 10  # min seconds between writes per inverter
-
-    def write_power_limit(self, unit_id: int, limit_pct: float,
-                          revert_time_s: int = 3600, ramp_time_s: int = 5) -> Dict:
-        """Write WMaxLimPct to Model 123 (SunSpec Immediate Controls).
-
-        Args:
-            unit_id: Inverter Modbus unit ID (1-4)
-            limit_pct: Power limit 10-100% (clamped)
-            revert_time_s: Auto-revert to 100% after N seconds (0=never)
-            ramp_time_s: Ramp time to new limit in seconds
-
-        Returns:
-            Dict with success, requested, actual, message
-        """
-        # Rate limit
-        now = time.time()
-        last = self._last_write_time.get(unit_id, 0)
-        if now - last < self.WRITE_RATE_LIMIT_SEC:
-            wait = self.WRITE_RATE_LIMIT_SEC - (now - last)
-            return {'success': False, 'message': f'Rate limited, retry in {wait:.0f}s'}
-
-        # Validate
-        limit_pct = max(10.0, min(100.0, float(limit_pct)))
-
-        # Get scale factor from last controls read
-        cached = self._controls_cache.get(unit_id)
-        if not cached:
-            # Force a controls read to get scale factor
-            self.log.info(f"Inverter {unit_id}: reading controls for scale factor...")
-            cached = self._read_immediate_controls(unit_id)
-            if cached:
-                self._controls_cache[unit_id] = cached
-
-        sf_wmax = -1  # default: values in tenths (80% = 800)
-        if cached and '_sf_wmax' in cached:
-            sf_wmax = cached['_sf_wmax']
-
-        # Calculate raw register value
-        raw_value = int(round(limit_pct * (10 ** (-sf_wmax))))
-        self.log.info(f"Inverter {unit_id}: writing power limit {limit_pct}% "
-                      f"(raw={raw_value}, sf={sf_wmax}, revert={revert_time_s}s)")
-
-        # Write 5 registers: WMaxLimPct, WinTms, RvrtTms, RmpTms, Ena
-        # Register addresses: 40233-40237 (Model 123 offsets 5-9)
-        values = [
-            raw_value,         # WMaxLimPct (offset 5)
-            0,                 # WMaxLimPct_WinTms: immediate (offset 6)
-            revert_time_s,     # WMaxLimPct_RvrtTms: auto-revert (offset 7)
-            ramp_time_s,       # WMaxLimPct_RmpTms: ramp time (offset 8)
-            1,                 # WMaxLimEna: enable=1 (offset 9)
-        ]
-
-        success = self.connection.write_registers(40233, values, unit_id)
-        self._last_write_time[unit_id] = now
-
-        if not success:
-            return {'success': False, 'requested': limit_pct,
-                    'message': 'Modbus write failed'}
-
-        # Read back to verify
-        time.sleep(0.5)
-        readback = self._read_immediate_controls(unit_id)
-        actual = None
-        if readback:
-            self._controls_cache[unit_id] = readback
-            actual = readback.get('power_limit_pct')
-
-        result = {
-            'success': True,
-            'requested': limit_pct,
-            'actual': actual,
-            'raw_written': raw_value,
-            'sf_wmax': sf_wmax,
-            'revert_time_s': revert_time_s,
-            'unit_id': unit_id,
-            'message': f'Power limit set to {limit_pct}%' + (f' (readback: {actual}%)' if actual else ''),
-        }
-        self.log.info(f"Inverter {unit_id}: power limit result: {result}")
-        return result
-
-    def restore_power_limit(self, unit_id: int) -> Dict:
-        """Restore power limit to 100% (disable WMaxLim)."""
-        # Write WMaxLimEna=0 to disable limiting
-        success = self.connection.write_registers(40237, [0], unit_id)
-        if success:
-            self.log.info(f"Inverter {unit_id}: power limit disabled (restored to 100%)")
-            return {'success': True, 'message': 'Power limit disabled (100%)'}
-        return {'success': False, 'message': 'Failed to restore power limit'}
+    # Future write methods placeholder:
+    # def write_power_limit(self, unit_id: int, limit_pct: float, ...) -> bool:
+    # def write_power_factor(self, unit_id: int, pf: float, ...) -> bool:
+    # def write_connection(self, unit_id: int, connect: bool, ...) -> bool:
 
     def _poll_meter(self, device_info: Dict, max_retries: int = 3) -> bool:
         """Poll a single meter with retry on failure."""
