@@ -72,6 +72,30 @@ def _validate_range(value, name: str, min_val=None, max_val=None):
 
 
 @dataclass
+class WriteConfig:
+    """Modbus write control settings (disabled by default)."""
+    enabled: bool = False
+    min_power_limit_pct: float = 10.0     # Safety floor: never below 10%
+    max_power_limit_pct: float = 100.0    # Safety ceiling
+    rate_limit_seconds: int = 30          # Min interval between writes per device
+    auto_revert_seconds: int = 3600       # Auto-restore 100% after 1 hour (0=disabled)
+    stabilization_delay: float = 2.0      # Seconds to wait after write before next read
+    command_topic_suffix: str = "cmd"     # MQTT topic suffix for commands
+
+    def __post_init__(self):
+        _validate_range(self.min_power_limit_pct, "write.min_power_limit_pct", 0, 100)
+        _validate_range(self.max_power_limit_pct, "write.max_power_limit_pct", 0, 100)
+        _validate_range(self.rate_limit_seconds, "write.rate_limit_seconds", 5, 3600)
+        _validate_range(self.auto_revert_seconds, "write.auto_revert_seconds", 0, 86400)
+        _validate_range(self.stabilization_delay, "write.stabilization_delay", 0.5, 30)
+        if self.min_power_limit_pct > self.max_power_limit_pct:
+            raise ConfigValidationError(
+                f"write.min_power_limit_pct ({self.min_power_limit_pct}) "
+                f"must be <= write.max_power_limit_pct ({self.max_power_limit_pct})"
+            )
+
+
+@dataclass
 class DebugConfig:
     """Diagnostic and data validation settings for buffer corruption detection."""
     validate_data: bool = True             # Enable buffer corruption detection + reconciliation
@@ -231,6 +255,7 @@ class ConfigLoader:
         self.mqtt: MQTTConfig = None
         self.influxdb: InfluxDBConfig = None
         self.debug: DebugConfig = None
+        self.write: WriteConfig = None
         self._load_config(config_path)
 
     @classmethod
@@ -365,6 +390,18 @@ class ConfigLoader:
             log_reconciliation=_env_get('DEBUG_LOG_RECONCILIATION', dbg.get('log_reconciliation', True), bool),
             log_publish_data=_env_get('DEBUG_LOG_PUBLISH_DATA', dbg.get('log_publish_data', False), bool),
             log_status_transitions=_env_get('DEBUG_LOG_STATUS_TRANSITIONS', dbg.get('log_status_transitions', True), bool),
+        )
+
+        # Parse write control settings
+        wr = self.config.get('write', {})
+        self.write = WriteConfig(
+            enabled=_env_get('WRITE_ENABLED', wr.get('enabled', False), bool),
+            min_power_limit_pct=_env_get('WRITE_MIN_POWER_LIMIT', wr.get('min_power_limit_pct', 10.0), float),
+            max_power_limit_pct=_env_get('WRITE_MAX_POWER_LIMIT', wr.get('max_power_limit_pct', 100.0), float),
+            rate_limit_seconds=_env_get('WRITE_RATE_LIMIT', wr.get('rate_limit_seconds', 30), int),
+            auto_revert_seconds=_env_get('WRITE_AUTO_REVERT', wr.get('auto_revert_seconds', 3600), int),
+            stabilization_delay=_env_get('WRITE_STABILIZATION_DELAY', wr.get('stabilization_delay', 2.0), float),
+            command_topic_suffix=_env_get('WRITE_COMMAND_TOPIC', wr.get('command_topic_suffix', 'cmd')),
         )
 
         # Parse InfluxDB settings

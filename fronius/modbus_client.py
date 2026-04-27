@@ -8,17 +8,18 @@ Architecture:
 
 import time
 import logging
+import queue
 import threading
 import subprocess
 import platform
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Dict, List, Optional, Callable
 
 from pymodbus.client import ModbusTcpClient
 from pymodbus.exceptions import ModbusException
 
-from .config import ModbusConfig, DevicesConfig, DebugConfig
+from .config import ModbusConfig, DevicesConfig, DebugConfig, WriteConfig
 from .register_parser import RegisterParser
 from .logging_setup import get_logger
 
@@ -35,6 +36,18 @@ class DeviceRuntimeState:
     model_id: Optional[int] = None
     model_id_verified_at: Optional[datetime] = None
     backoff_until: Optional[float] = None  # timestamp when to retry
+
+
+@dataclass
+class PowerLimitCommand:
+    """Command to set inverter power limit via Modbus write."""
+    device_id: int
+    limit_pct: float          # 0-100 percentage
+    revert_timeout: int = 0   # WMaxLim_RvrtTms (0 = no auto-revert at inverter level)
+    ramp_time: int = 0        # WMaxLim_RmpTms (seconds for gradual transition)
+    source: str = "mqtt"      # "mqtt" or "auto_revert"
+    timestamp: float = field(default_factory=time.time)
+
 
 # Suppress pymodbus exception logging
 logging.getLogger("pymodbus").setLevel(logging.CRITICAL)
@@ -195,6 +208,57 @@ class ModbusConnection:
             self.failed_reads += 1
             return None
 
+    def write_registers(self, address: int, values: List[int], unit_id: int) -> bool:
+        """Write holding registers with thread-safe access.
+
+        Args:
+            address: SunSpec 1-indexed register address
+            values: List of 16-bit register values to write
+            unit_id: Modbus device ID
+
+        Returns:
+            True on success
+        """
+        with self.lock:
+            try:
+                if not self.connected or not self.client.is_socket_open():
+                    if self.client:
+                        try:
+                            self.client.close()
+                        except Exception:
+                            pass
+                    self.client = ModbusTcpClient(
+                        host=self.config.host,
+                        port=self.config.port,
+                        timeout=self.config.timeout
+                    )
+                    self.connected = self.client.connect()
+                    if not self.connected:
+                        self.log.error(f"Unit {unit_id}: write failed — cannot connect")
+                        return False
+
+                result = self.client.write_registers(
+                    address=address - 1,  # pymodbus is 0-indexed
+                    values=values,
+                    device_id=unit_id
+                )
+
+                if result.isError():
+                    self.log.error(f"Unit {unit_id}: write error at {address}: {result}")
+                    return False
+
+                self.last_unit_id = unit_id
+                self.log.warning(
+                    f"Unit {unit_id}: wrote {len(values)} registers at {address}: "
+                    f"{[f'0x{v:04X}' for v in values]}"
+                )
+                return True
+
+            except Exception as e:
+                self.log.error(f"Unit {unit_id}: write exception at {address}: {e}")
+                self.connected = False
+                return False
+
     def identify_device(self, unit_id: int) -> Optional[Dict]:
         """Identify a device by reading SunSpec registers."""
         regs = self.read_registers(40001, 69, unit_id)
@@ -285,7 +349,9 @@ class DevicePoller(threading.Thread):
     def __init__(self, modbus_config: ModbusConfig, inverters: List[Dict],
                  meters: List[Dict], poll_delay: float, read_delay_ms: int,
                  parser: RegisterParser, publish_callback: Callable,
-                 debug_config: DebugConfig = None):
+                 debug_config: DebugConfig = None,
+                 write_config: WriteConfig = None,
+                 command_result_callback: Callable = None):
         super().__init__(daemon=True, name="DevicePoller")
         self.modbus_config = modbus_config
         self.inverters = inverters
@@ -298,6 +364,8 @@ class DevicePoller(threading.Thread):
         self.running = False
         self._stop_event = threading.Event()
         self.debug_config = debug_config or DebugConfig()
+        self.write_config = write_config
+        self._command_result_callback = command_result_callback
 
         # Single connection for all devices
         self.connection = ModbusConnection(modbus_config, parser)
@@ -322,6 +390,14 @@ class DevicePoller(threading.Thread):
         self._corruption_count: Dict[int, int] = {}     # {unit_id: corruption count}
         self._last_status: Dict[int, int] = {}           # {unit_id: last status_code}
         self._night_skip_logged = False                  # Log night skip message once
+
+        # Write command processing
+        self._command_queue: queue.Queue = queue.Queue(maxsize=10)
+        self._last_write_time: Dict[int, float] = {}     # Rate limiting per device
+        self._active_limits: Dict[int, dict] = {}         # Tracks active power limits
+        self._auto_revert_timers: Dict[int, float] = {}   # Timestamp when to auto-revert
+        self._write_count = 0
+        self._write_failures = 0
 
     def _runtime_key(self, device_id: int, device_type: str) -> str:
         """Generate unique key for device runtime tracking."""
@@ -887,11 +963,17 @@ class DevicePoller(threading.Thread):
         if dcv_raw == 0xFFFF:
             return None
 
-        # Apply scale factors
-        dc_current = dca_raw * (10 ** sf_dca) if dca_raw != 0xFFFF else None
-        dc_voltage = dcv_raw * (10 ** sf_dcv) if dcv_raw != 0xFFFF else None
-        dc_power = dcw_raw * (10 ** sf_dcw) if dcw_raw != 0xFFFF else None
-        dc_energy = dcwh_raw * (10 ** sf_dcwh) if dcwh_raw != 0xFFFFFFFF else None
+        # Apply scale factors (round negative SF to eliminate IEEE 754 float noise)
+        def _scale(raw, sf, not_impl=0xFFFF):
+            if raw == not_impl:
+                return None
+            result = raw * (10 ** sf)
+            return round(result, -sf) if sf < 0 else result
+
+        dc_current = _scale(dca_raw, sf_dca)
+        dc_voltage = _scale(dcv_raw, sf_dcv)
+        dc_power = _scale(dcw_raw, sf_dcw)
+        dc_energy = _scale(dcwh_raw, sf_dcwh, not_impl=0xFFFFFFFF)
         temperature = tmp_raw if tmp_raw != -32768 else None
 
         return {
@@ -1026,10 +1108,291 @@ class DevicePoller(threading.Thread):
             '_sf_var': sf_var
         }
 
-    # Future write methods placeholder:
-    # def write_power_limit(self, unit_id: int, limit_pct: float, ...) -> bool:
-    # def write_power_factor(self, unit_id: int, pf: float, ...) -> bool:
-    # def write_connection(self, unit_id: int, connect: bool, ...) -> bool:
+    def queue_power_limit_command(self, cmd: PowerLimitCommand) -> bool:
+        """Validate and enqueue a power limit command.
+
+        Called from MQTT thread — must be thread-safe.
+
+        Returns:
+            True if command was queued successfully
+        """
+        if not self.write_config or not self.write_config.enabled:
+            self.log.warning(f"Inverter {cmd.device_id}: write rejected — writes disabled")
+            return False
+
+        # Validate device exists
+        inv_ids = [inv['device_id'] for inv in self.inverters]
+        if cmd.device_id not in inv_ids:
+            self.log.warning(f"Inverter {cmd.device_id}: write rejected — unknown device")
+            return False
+
+        # Validate range
+        min_pct = self.write_config.min_power_limit_pct
+        max_pct = self.write_config.max_power_limit_pct
+        if not (min_pct <= cmd.limit_pct <= max_pct):
+            self.log.warning(
+                f"Inverter {cmd.device_id}: write rejected — "
+                f"limit {cmd.limit_pct}% outside range [{min_pct}, {max_pct}]"
+            )
+            return False
+
+        try:
+            self._command_queue.put_nowait(cmd)
+            self.log.info(
+                f"Inverter {cmd.device_id}: power limit command queued "
+                f"({cmd.limit_pct}%, source={cmd.source})"
+            )
+            return True
+        except queue.Full:
+            self.log.warning(f"Inverter {cmd.device_id}: command queue full, rejecting")
+            return False
+
+    def _process_pending_commands(self):
+        """Process one pending write command from the queue.
+
+        Called from the poller thread between poll cycles — serialized with reads.
+        Only processes one command per cycle to avoid blocking polling for too long
+        (each write takes ~5s: reset + pre-read + write + stabilization + readback).
+        """
+        try:
+            cmd = self._command_queue.get_nowait()
+        except queue.Empty:
+            return
+
+        result = self._execute_power_limit_write(cmd)
+
+        # Re-queue rate-limited commands (will retry next poll cycle)
+        if result.get('status') == 'rate_limited':
+            try:
+                self._command_queue.put_nowait(cmd)
+            except queue.Full:
+                pass  # Drop if queue is full
+            return  # Don't publish rate_limited as a result — it's transient
+
+        # Publish result via callback
+        if self._command_result_callback:
+            try:
+                self._command_result_callback(
+                    str(cmd.device_id), "set_power_limit", result
+                )
+            except Exception as e:
+                self.log.error(f"Inverter {cmd.device_id}: result callback error: {e}")
+
+    def _execute_power_limit_write(self, cmd: PowerLimitCommand) -> dict:
+        """Execute the 11-step safety protocol for power limit write.
+
+        Returns:
+            Result dict with status, before/after values
+        """
+        device_id = cmd.device_id
+        result = {
+            'command': 'set_power_limit',
+            'device_id': device_id,
+            'requested_pct': cmd.limit_pct,
+            'source': cmd.source,
+            'timestamp': time.time(),
+        }
+
+        # Step 1: Rate limit check (auto_revert/shutdown bypass — safety critical)
+        now = time.time()
+        last_write = self._last_write_time.get(device_id, 0)
+        if cmd.source not in ("auto_revert", "shutdown") and now - last_write < self.write_config.rate_limit_seconds:
+            remaining = int(self.write_config.rate_limit_seconds - (now - last_write))
+            self.log.warning(
+                f"Inverter {device_id}: write rate limited — "
+                f"wait {remaining}s"
+            )
+            result['status'] = 'rate_limited'
+            result['reason'] = f'rate limited, retry in {remaining}s'
+            return result
+
+        # Step 2: Validate range (already checked in queue, but double-check)
+        min_pct = self.write_config.min_power_limit_pct
+        max_pct = self.write_config.max_power_limit_pct
+        if not (min_pct <= cmd.limit_pct <= max_pct):
+            result['status'] = 'rejected'
+            result['reason'] = f'limit {cmd.limit_pct}% outside [{min_pct}, {max_pct}]'
+            self._write_failures += 1
+            return result
+
+        # Step 3: Force connection reset (clear DataManager buffer)
+        self.connection.connected = False
+        time.sleep(0.5)
+
+        # Step 4: Pre-write read — read Model 123 to verify and get current SF
+        pre_regs = self.connection.read_registers(40228, 26, device_id)
+        if not pre_regs or len(pre_regs) < 26:
+            self.log.error(f"Inverter {device_id}: pre-write Model 123 read failed")
+            result['status'] = 'error'
+            result['reason'] = 'pre-write read failed'
+            self._write_failures += 1
+            return result
+
+        # Step 5: Verify model_id=123
+        model_id = pre_regs[0]
+        if model_id != 123:
+            self.log.error(
+                f"Inverter {device_id}: Model 123 verification failed "
+                f"(got {model_id})"
+            )
+            result['status'] = 'error'
+            result['reason'] = f'model verification failed (got {model_id})'
+            self._write_failures += 1
+            return result
+
+        # Get current scale factor and values
+        sf_wmax = pre_regs[23] if pre_regs[23] < 32768 else pre_regs[23] - 65536
+        before_raw = pre_regs[5]
+        before_pct = before_raw * (10 ** sf_wmax) if before_raw != 0xFFFF else None
+        before_ena = pre_regs[9]
+
+        result['before_pct'] = before_pct
+        result['before_enabled'] = before_ena == 1
+        result['scale_factor'] = sf_wmax
+
+        self.log.warning(
+            f"Inverter {device_id}: pre-write state — "
+            f"WMaxLimPct={before_pct}% (raw={before_raw}, SF={sf_wmax}), "
+            f"enabled={before_ena}"
+        )
+
+        # Step 6: Calculate raw register value
+        raw_limit = int(cmd.limit_pct / (10 ** sf_wmax))
+
+        # Step 7: Write 5 registers atomically at 40233-40237
+        # [WMaxLimPct, WMaxLimPct_WinTms, WMaxLimPct_RvrtTms, WMaxLimPct_RmpTms, WMaxLim_Ena]
+        enable_val = 1  # Enable power limiting
+        write_values = [raw_limit, 0, cmd.revert_timeout, cmd.ramp_time, enable_val]
+
+        self.log.warning(
+            f"Inverter {device_id}: writing Model 123 registers 40233-40237: "
+            f"[{raw_limit} ({cmd.limit_pct}%), 0, {cmd.revert_timeout}, "
+            f"{cmd.ramp_time}, {enable_val}]"
+        )
+
+        if not self.connection.write_registers(40233, write_values, device_id):
+            self.log.error(f"Inverter {device_id}: register write failed")
+            result['status'] = 'error'
+            result['reason'] = 'register write failed'
+            self._write_failures += 1
+            return result
+
+        # Step 8: Wait stabilization delay
+        self.log.info(
+            f"Inverter {device_id}: waiting {self.write_config.stabilization_delay}s "
+            f"for DataManager stabilization"
+        )
+        time.sleep(self.write_config.stabilization_delay)
+
+        # Step 9: Read-back verification — force reset and re-read Model 123
+        self.connection.connected = False
+        time.sleep(0.5)
+
+        post_regs = self.connection.read_registers(40228, 26, device_id)
+        if not post_regs or len(post_regs) < 26:
+            self.log.warning(f"Inverter {device_id}: post-write read-back failed (write may have succeeded)")
+            result['status'] = 'unverified'
+            result['reason'] = 'read-back failed'
+        else:
+            post_model = post_regs[0]
+            if post_model != 123:
+                self.log.warning(
+                    f"Inverter {device_id}: read-back Model 123 mismatch "
+                    f"(got {post_model}), write may have succeeded"
+                )
+                result['status'] = 'unverified'
+                result['reason'] = f'read-back model mismatch (got {post_model})'
+            else:
+                post_sf = post_regs[23] if post_regs[23] < 32768 else post_regs[23] - 65536
+                post_raw = post_regs[5]
+                post_pct = post_raw * (10 ** post_sf) if post_raw != 0xFFFF else None
+                post_ena = post_regs[9]
+
+                result['after_pct'] = post_pct
+                result['after_enabled'] = post_ena == 1
+
+                # Verify: compare with tolerance (scale factor rounding)
+                if post_pct is not None and abs(post_pct - cmd.limit_pct) < 1.0:
+                    result['status'] = 'success'
+                    self.log.warning(
+                        f"Inverter {device_id}: power limit set to {post_pct}% "
+                        f"(was {before_pct}%)"
+                    )
+                else:
+                    result['status'] = 'mismatch'
+                    result['reason'] = f'expected ~{cmd.limit_pct}%, read-back {post_pct}%'
+                    self.log.error(
+                        f"Inverter {device_id}: read-back mismatch — "
+                        f"expected ~{cmd.limit_pct}%, got {post_pct}%"
+                    )
+
+        # Step 10: Update tracking
+        self._last_write_time[device_id] = time.time()
+        self._write_count += 1
+
+        if result.get('status') in ('success', 'unverified'):
+            self._active_limits[device_id] = {
+                'limit_pct': cmd.limit_pct,
+                'set_at': time.time(),
+                'source': cmd.source,
+            }
+            # Set auto-revert timer (only for non-100% limits)
+            if (self.write_config.auto_revert_seconds > 0
+                    and cmd.limit_pct < 100.0
+                    and cmd.source != "auto_revert"):
+                self._auto_revert_timers[device_id] = (
+                    time.time() + self.write_config.auto_revert_seconds
+                )
+                self.log.info(
+                    f"Inverter {device_id}: auto-revert to 100% in "
+                    f"{self.write_config.auto_revert_seconds}s"
+                )
+            else:
+                # Clear auto-revert timer for 100% or auto_revert commands
+                self._auto_revert_timers.pop(device_id, None)
+                self._active_limits.pop(device_id, None)
+
+        # Step 11: Force controls re-read on next poll cycle
+        self._last_controls_read.pop(device_id, None)
+
+        return result
+
+    def _check_auto_revert(self):
+        """Check for expired auto-revert timers and queue restore commands."""
+        now = time.time()
+        expired = [
+            dev_id for dev_id, expires_at in self._auto_revert_timers.items()
+            if now >= expires_at
+        ]
+        for device_id in expired:
+            active = self._active_limits.get(device_id, {})
+            self.log.warning(
+                f"Inverter {device_id}: auto-reverting power limit to 100% "
+                f"(was {active.get('limit_pct', '?')}%, "
+                f"set {int(now - active.get('set_at', now))}s ago)"
+            )
+            cmd = PowerLimitCommand(
+                device_id=device_id,
+                limit_pct=100.0,
+                source="auto_revert",
+            )
+            try:
+                self._command_queue.put_nowait(cmd)
+            except queue.Full:
+                self.log.error(f"Inverter {device_id}: auto-revert failed — queue full")
+            # Remove timer regardless (will be re-checked next cycle)
+            self._auto_revert_timers.pop(device_id, None)
+
+    def get_write_stats(self) -> Dict:
+        """Get write operation statistics."""
+        return {
+            'writes_total': self._write_count,
+            'writes_failed': self._write_failures,
+            'active_limits': {
+                str(k): v for k, v in self._active_limits.items()
+            },
+            'queue_size': self._command_queue.qsize(),
+        }
 
     def _poll_meter(self, device_info: Dict, max_retries: int = 3) -> bool:
         """Poll a single meter with retry on failure."""
@@ -1208,11 +1571,41 @@ class DevicePoller(threading.Thread):
                     else:
                         self._enter_sleep_mode(f"No data after {self._consecutive_failures} attempts")
 
+            # Process pending write commands (between poll cycles)
+            if self.write_config and self.write_config.enabled:
+                self._process_pending_commands()
+                self._check_auto_revert()
+
             # Sleep before next poll cycle (always sleep, just different intervals)
             self._stop_event.wait(self._get_poll_interval())
 
         self.connection.disconnect()
         self.log.info("DevicePoller: stopped")
+
+    def restore_all_power_limits(self):
+        """Restore all active power limits to 100% during shutdown."""
+        if not self._active_limits:
+            return
+
+        for device_id in list(self._active_limits.keys()):
+            active = self._active_limits[device_id]
+            self.log.warning(
+                f"Inverter {device_id}: shutdown — restoring power limit to 100% "
+                f"(was {active.get('limit_pct', '?')}%)"
+            )
+            cmd = PowerLimitCommand(
+                device_id=device_id,
+                limit_pct=100.0,
+                source="shutdown",
+            )
+            result = self._execute_power_limit_write(cmd)
+            if result.get('status') == 'success':
+                self.log.warning(f"Inverter {device_id}: power limit restored to 100%")
+            else:
+                self.log.error(
+                    f"Inverter {device_id}: failed to restore power limit — "
+                    f"{result.get('status')}: {result.get('reason', 'unknown')}"
+                )
 
     def stop(self):
         self.running = False
@@ -1224,10 +1617,14 @@ class FroniusModbusClient:
 
     def __init__(self, modbus_config: ModbusConfig, devices_config: DevicesConfig,
                  register_map: Dict, publish_callback: Callable = None,
-                 debug_config: DebugConfig = None):
+                 debug_config: DebugConfig = None,
+                 write_config: WriteConfig = None,
+                 command_result_callback: Callable = None):
         self.modbus_config = modbus_config
         self.devices_config = devices_config
         self.debug_config = debug_config or DebugConfig()
+        self.write_config = write_config
+        self.command_result_callback = command_result_callback
         self.parser = RegisterParser(register_map, debug_config=self.debug_config)
         self.log = get_logger()
 
@@ -1247,10 +1644,19 @@ class FroniusModbusClient:
         return self.connected
 
     def disconnect(self):
-        # Stop poller
+        # Stop poller (safe to call even if already stopped)
         if self.device_poller:
             self.device_poller.stop()
-            self.device_poller.join(timeout=10)
+            if self.device_poller.is_alive():
+                self.device_poller.join(timeout=10)
+
+        # Disconnect poller's connection (run() disconnects on exit,
+        # but if poller was stopped externally before run() finished, clean up)
+        if self.device_poller and self.device_poller.connection:
+            try:
+                self.device_poller.connection.disconnect()
+            except Exception:
+                pass
 
         # Disconnect discovery connection
         self.connection.disconnect()
@@ -1309,7 +1715,9 @@ class FroniusModbusClient:
                 read_delay_ms=self.devices_config.inverter_read_delay_ms,
                 parser=self.parser,
                 publish_callback=self.publish_callback,
-                debug_config=self.debug_config
+                debug_config=self.debug_config,
+                write_config=self.write_config,
+                command_result_callback=self.command_result_callback,
             )
             self.device_poller.start()
             self.log.info("Started single DevicePoller thread for all devices")

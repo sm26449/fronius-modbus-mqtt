@@ -1,6 +1,6 @@
 # Fronius Modbus MQTT
 
-[![Version](https://img.shields.io/badge/version-1.5.0-blue.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-1.6.0-blue.svg)](CHANGELOG.md)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
 Python application that reads data from Fronius inverters and smart meters via Modbus TCP and publishes to MQTT and/or InfluxDB.
@@ -12,6 +12,7 @@ Python application that reads data from Fronius inverters and smart meters via M
 - **Home Assistant Integration** - MQTT autodiscovery for automatic entity creation
 - **Runtime Monitoring** - Per-device online/offline status, read error counters, uptime tracking
 - **MPPT Data** - Per-string voltage, current, and power (Model 160)
+- **Power Limit Control** - Write inverter power limits via MQTT commands (Model 123) with 11-step safety protocol
 - **Immediate Controls** - Read inverter control settings (Model 123)
 - **Event Parsing** - Decode Fronius event flags with human-readable descriptions
 - **Data Validation** - Automatic detection and reconciliation of DataManager buffer corruption using MPPT as ground truth
@@ -188,6 +189,64 @@ influxdb:
   publish_mode: changed        # 'changed' or 'all'
 ```
 
+### Power Limit Control
+
+> **CAUTION**: This feature writes to inverter Modbus registers. Incorrect use can affect inverter operation. Disabled by default — must be explicitly enabled.
+
+```yaml
+write:
+  enabled: false                # Must explicitly enable
+  min_power_limit_pct: 10       # Safety floor: never limit below 10%
+  max_power_limit_pct: 100      # Safety ceiling
+  rate_limit_seconds: 30        # Min time between writes per device
+  auto_revert_seconds: 3600     # Auto-restore 100% after 1h (0=disabled)
+  stabilization_delay: 2.0      # Wait after write before next read
+```
+
+**MQTT Command Topics** (QoS 1):
+
+| Topic | Payload | Description |
+|-------|---------|-------------|
+| `fronius/inverter/{id}/cmd/set_power_limit` | `{"limit_pct": 50}` | Set power limit to 50% |
+| `fronius/inverter/{id}/cmd/set_power_limit` | `{"limit_pct": 50, "revert_timeout": 1800, "ramp_time": 10}` | With hardware revert (30min) and ramp |
+| `fronius/inverter/{id}/cmd/restore_power_limit` | `{}` | Restore to 100% (shortcut) |
+
+**Result Topic**: `fronius/inverter/{id}/cmd/result`
+```json
+{
+  "command": "set_power_limit",
+  "status": "success",
+  "device_id": 1,
+  "before": {"limit_pct": 100.0, "enabled": true},
+  "after": {"limit_pct": 50.0, "enabled": true},
+  "timestamp": "2026-04-27T14:30:00"
+}
+```
+
+**Usage Examples:**
+```bash
+# Set inverter 1 to 50% power
+mosquitto_pub -h broker -t 'fronius/inverter/1/cmd/set_power_limit' -m '{"limit_pct": 50}'
+
+# Set with hardware revert timeout (inverter restores 100% after 30min even if software fails)
+mosquitto_pub -h broker -t 'fronius/inverter/1/cmd/set_power_limit' \
+  -m '{"limit_pct": 70, "revert_timeout": 1800, "ramp_time": 5}'
+
+# Restore to 100%
+mosquitto_pub -h broker -t 'fronius/inverter/1/cmd/restore_power_limit' -m '{}'
+```
+
+**Safety Measures:**
+- Disabled by default — requires `write.enabled: true`
+- All writes go through the existing polling connection (no separate connections)
+- Rate limited: minimum 30s between writes per device
+- Range validation: configurable floor (default 10%) and ceiling (default 100%)
+- Connection reset + pre-write verification before every write
+- Post-write read-back confirms the value was applied
+- Software auto-revert: restores 100% after timeout (default 1h)
+- Hardware auto-revert: `revert_timeout` parameter sets inverter-level fallback
+- Shutdown restore: all active limits restored to 100% on graceful shutdown
+
 ### Debug & Data Validation
 
 ```yaml
@@ -268,6 +327,13 @@ Configuration can also be set via environment variables (useful for Docker):
 | `INFLUXDB_PUBLISH_MODE` | Override publish mode for InfluxDB | `` |
 | `INFLUXDB_VERIFY_SSL` | Verify SSL certificates | `true` |
 | `INFLUXDB_SSL_CA_CERT` | Path to CA certificate file | `` |
+| **Power Limit Control** | | |
+| `WRITE_ENABLED` | Enable Modbus write commands | `false` |
+| `WRITE_MIN_POWER_LIMIT` | Minimum power limit % (safety floor) | `10` |
+| `WRITE_MAX_POWER_LIMIT` | Maximum power limit % (safety ceiling) | `100` |
+| `WRITE_RATE_LIMIT` | Min seconds between writes per device | `30` |
+| `WRITE_AUTO_REVERT` | Auto-restore 100% after N seconds (0=disabled) | `3600` |
+| `WRITE_STABILIZATION_DELAY` | Wait after write before next read (s) | `2.0` |
 
 ## Command Line Options
 
@@ -332,6 +398,13 @@ fronius/meter/{id}/runtime/last_seen
 fronius/meter/{id}/runtime/read_errors
 fronius/meter/{id}/runtime/uptime
 fronius/meter/{id}/runtime/model_id
+```
+
+### Power Limit Command Topics
+```
+fronius/inverter/{id}/cmd/set_power_limit      # Set power limit (JSON payload)
+fronius/inverter/{id}/cmd/restore_power_limit   # Restore to 100% (empty JSON)
+fronius/inverter/{id}/cmd/result                # Command result (not retained)
 ```
 
 ### Inverter Topics

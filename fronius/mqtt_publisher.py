@@ -4,10 +4,10 @@ import math
 import time
 import json
 import threading
-from typing import Dict, Any, Optional, Set, List
+from typing import Dict, Any, Optional, Set, List, Callable
 import paho.mqtt.client as mqtt
 
-from .config import MQTTConfig
+from .config import MQTTConfig, WriteConfig
 from .logging_setup import get_logger
 from . import __version__
 
@@ -288,16 +288,22 @@ class MQTTPublisher:
         'grid_charging_code': 'ChaGriSet',
     }
 
-    def __init__(self, config: MQTTConfig, publish_mode: str = 'changed'):
+    def __init__(self, config: MQTTConfig, publish_mode: str = 'changed',
+                 command_callback: Callable = None,
+                 write_config: WriteConfig = None):
         """
         Initialize MQTT publisher.
 
         Args:
             config: MQTT configuration
             publish_mode: 'changed' (only publish changes) or 'all' (always publish)
+            command_callback: Callback for incoming commands (device_id, command, payload)
+            write_config: Write configuration (for command topic suffix)
         """
         self.config = config
         self.publish_mode = publish_mode
+        self._command_callback = command_callback
+        self._cmd_suffix = write_config.command_topic_suffix if write_config else "cmd"
         self.client: mqtt.Client = None
         self._connected = threading.Event()
         self.last_values: Dict[str, Any] = {}
@@ -362,10 +368,12 @@ class MQTTPublisher:
 
         self.client.on_connect = self._on_connect
         self.client.on_disconnect = self._on_disconnect
+        if self._command_callback:
+            self.client.on_message = self._on_message
         self.client.reconnect_delay_set(min_delay=1, max_delay=60)
 
     def _on_connect(self, client, userdata, flags, reason_code, properties=None):
-        """Handle connection established — clear cache and re-publish online status."""
+        """Handle connection established — clear cache, subscribe to commands, re-publish status."""
         try:
             if reason_code == 0:
                 self.connected = True
@@ -382,6 +390,11 @@ class MQTTPublisher:
                     self.client.publish(status_topic, "online", qos=1, retain=True)
                 except Exception:
                     pass
+                # Subscribe to command topics if command callback is set
+                if self._command_callback:
+                    cmd_topic = f"{self.config.topic_prefix}/inverter/+/{self._cmd_suffix}/#"
+                    client.subscribe(cmd_topic, qos=1)
+                    self.log.info(f"MQTT subscribed to command topic: {cmd_topic}")
             else:
                 self.connected = False
                 self.log.error(f"MQTT connection failed: {reason_code}")
@@ -521,6 +534,53 @@ class MQTTPublisher:
             self.client.loop_stop()
         self.connected = False
         self.log.info("MQTT disconnected")
+
+    def _on_message(self, client, userdata, msg):
+        """Handle incoming MQTT command messages.
+
+        Topic format: {prefix}/inverter/{id}/cmd/{command}
+        """
+        try:
+            topic_parts = msg.topic.split('/')
+            # Expected: [prefix, 'inverter', device_id, cmd_suffix, command]
+            if len(topic_parts) < 5 or topic_parts[1] != 'inverter' or topic_parts[3] != self._cmd_suffix:
+                self.log.debug(f"MQTT ignoring unexpected topic: {msg.topic}")
+                return
+
+            device_id = topic_parts[2]
+            command = topic_parts[4]
+
+            # Ignore result messages (published by us, matched by wildcard subscription)
+            if command == 'result':
+                return
+
+            # Parse JSON payload
+            try:
+                payload = json.loads(msg.payload.decode()) if msg.payload else {}
+            except (json.JSONDecodeError, UnicodeDecodeError) as e:
+                self.log.warning(f"MQTT command: invalid JSON payload on {msg.topic}: {e}")
+                return
+
+            self.log.info(f"MQTT command received: {command} for inverter {device_id}")
+            self._command_callback(device_id, command, payload)
+
+        except Exception as e:
+            self.log.error(f"MQTT command handler error: {e}")
+
+    def publish_command_result(self, device_id: str, command: str, result: dict):
+        """Publish command execution result (not retained — transient event).
+
+        Topic: {prefix}/inverter/{device_id}/cmd/result
+        """
+        topic = f"{self.config.topic_prefix}/inverter/{device_id}/{self._cmd_suffix}/result"
+        result['command'] = command
+        try:
+            payload = json.dumps(result, default=str)
+            self.client.publish(topic, payload, qos=1, retain=False)
+            self.messages_published += 1
+            self.log.debug(f"Published command result to {topic}")
+        except Exception as e:
+            self.log.error(f"Failed to publish command result: {e}")
 
     def _build_topic(self, device_type: str, device_id: str,
                      field: str = None) -> str:

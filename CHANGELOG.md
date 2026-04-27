@@ -5,6 +5,49 @@ All notable changes to Fronius Modbus MQTT will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.0] - 2026-04-27
+
+### Added
+- **Inverter Power Limit Control via Modbus TCP Write**
+  - Control inverter output power (WMaxLimPct) via MQTT commands
+  - SunSpec Model 123 (Immediate Controls) — atomic 5-register write (40233-40237)
+  - MQTT command topics: `fronius/inverter/{id}/cmd/set_power_limit` and `cmd/restore_power_limit`
+  - MQTT result topic: `fronius/inverter/{id}/cmd/result` with success/failure status
+  - 11-step safety write protocol:
+    1. Rate limiting (min 30s between writes per device)
+    2. Range validation (configurable min/max, default 10%-100%)
+    3. Connection reset (flush DataManager buffer)
+    4. Stabilization wait (0.5s for DataManager reset)
+    5. Pre-write read (verify Model 123, get current scale factor)
+    6. Register value calculation with scale factor
+    7. Atomic 5-register write (limit, flags, revert timeout, ramp time, enable)
+    8. Post-write stabilization delay (2s default)
+    9. Read-back verification (confirm written value matches)
+    10. Active limit tracking for auto-revert
+    11. Result callback with before/after values
+  - Auto-revert: automatically restore 100% after configurable timeout (default 1h)
+  - Hardware-level revert: WMaxLim_RvrtTms register provides inverter-side fallback
+  - Rate-limited commands re-queued for execution on next poll cycle
+  - Bounded command queue (maxsize=10) prevents memory issues
+  - All writes serialized with reads through the existing DevicePoller connection
+  - Disabled by default — must explicitly set `write.enabled: true`
+  - New configuration section: `write:` with `enabled`, `min_power_limit_pct`, `max_power_limit_pct`, `rate_limit_seconds`, `auto_revert_seconds`, `stabilization_delay`
+  - Environment variable overrides: `WRITE_ENABLED`, `WRITE_MIN_POWER_LIMIT`, `WRITE_MAX_POWER_LIMIT`, `WRITE_RATE_LIMIT`, `WRITE_AUTO_REVERT`, `WRITE_STABILIZATION_DELAY`
+- **Vendor Status Code Persistence to InfluxDB**
+  - `vendor_status_code` (int) and `vendor_status_description` (string) fields in `fronius_inverter` measurement
+  - Decoded from Fronius vendor event register (evt_vnd1) using FroniusEventFlags.json
+  - Enables Grafana alerting on specific vendor fault codes
+
+### Fixed
+- **Shutdown Race Condition** — Poller thread now explicitly stopped and joined before `restore_all_power_limits()` runs; prevents concurrent Modbus access on the same connection during shutdown
+- **MPPT Float Noise** — `_parse_mppt_module_optimized` now applies `round(result, -sf)` for negative scale factors, matching `RegisterParser.apply_scale_factor()` behavior; eliminates IEEE 754 artifacts (e.g. 5.050000000000001 → 5.05)
+- **IEEE 754 Float Noise in Scale Factors** — `RegisterParser.apply_scale_factor()` rounds results for negative scale factors to eliminate floating-point artifacts across all measurements
+- **FroniusModbusClient.disconnect() Robustness** — Tolerant to already-stopped poller (checks `is_alive()` before `join()`); explicitly disconnects poller's connection on shutdown
+
+### Changed
+- **Shutdown Sequence** — Stop poller loop → restore power limits → disconnect connections (was: restore while poller still running)
+- **MQTT QoS 1 for Commands** — Command subscription uses QoS 1 for reliable delivery
+
 ## [1.5.0] - 2026-03-05
 
 ### Added
@@ -486,6 +529,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 | Version | Date | Highlights |
 |---------|------|------------|
+| 1.6.0 | 2026-04-27 | Power limit control via MQTT, vendor status to InfluxDB, shutdown safety, float fixes |
 | 1.5.0 | 2026-03-05 | Buffer corruption detection, night inverter skip, debug system, 2× audit hardening |
 | 1.4.1 | 2026-02-26 | Storage InfluxDB, MPPT temp, thread safety, HA discovery expansion |
 | 1.4.0 | 2026-02-26 | Resilient reconnection, data loss prevention, graceful shutdown |

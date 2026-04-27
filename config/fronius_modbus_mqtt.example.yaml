@@ -68,6 +68,19 @@ influxdb:
   # verify_ssl: true           # Verify SSL certificates
   # ssl_ca_cert: ""            # Path to CA certificate file
 
+# Power Limit Control (CAUTION — writes to inverter registers)
+# -----------------------------------------------------------
+# Enables Modbus TCP write to SunSpec Model 123 (Immediate Controls).
+# Commands are sent via MQTT: fronius/inverter/{id}/cmd/set_power_limit
+# Results published to: fronius/inverter/{id}/cmd/result
+# write:
+#   enabled: false                # Must explicitly enable (default: disabled)
+#   min_power_limit_pct: 10       # Safety floor: never limit below 10%
+#   max_power_limit_pct: 100      # Safety ceiling
+#   rate_limit_seconds: 30        # Min time between writes per device
+#   auto_revert_seconds: 3600     # Auto-restore 100% after 1h (0=disabled)
+#   stabilization_delay: 2.0      # Wait after write before next read (DataManager needs time)
+
 # Debug & Data Validation
 # -----------------------
 # DataManager buffer corruption detection and diagnostic logging.

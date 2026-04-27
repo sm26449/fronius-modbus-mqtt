@@ -35,6 +35,7 @@ from fronius import (
     MQTTPublisher,
     InfluxDBPublisher,
 )
+from fronius.modbus_client import PowerLimitCommand
 
 
 class FroniusModbusMQTT:
@@ -144,6 +145,92 @@ class FroniusModbusMQTT:
                 except Exception as e:
                     self.log.error(f"InfluxDB write error for storage {device_id}: {e}")
 
+    def _handle_mqtt_command(self, device_id: str, command: str, payload: dict):
+        """Handle incoming MQTT commands (called from MQTT thread)."""
+        if not self.config.write or not self.config.write.enabled:
+            self.log.warning(f"MQTT command '{command}' rejected — writes disabled")
+            if self.mqtt_publisher:
+                self.mqtt_publisher.publish_command_result(device_id, command, {
+                    'status': 'rejected', 'reason': 'writes disabled'
+                })
+            return
+
+        if not self.modbus_client or not self.modbus_client.device_poller:
+            self.log.warning(f"MQTT command '{command}' rejected — poller not ready")
+            return
+
+        try:
+            dev_id = int(device_id)
+        except ValueError:
+            self.log.warning(f"MQTT command: invalid device_id '{device_id}'")
+            return
+
+        if command == 'set_power_limit':
+            limit_pct = payload.get('limit_pct')
+            if limit_pct is None:
+                self.log.warning("MQTT command: missing 'limit_pct' in payload")
+                if self.mqtt_publisher:
+                    self.mqtt_publisher.publish_command_result(device_id, command, {
+                        'status': 'rejected', 'reason': 'missing limit_pct'
+                    })
+                return
+            try:
+                limit_pct = float(limit_pct)
+            except (TypeError, ValueError):
+                self.log.warning(f"MQTT command: invalid limit_pct '{limit_pct}'")
+                if self.mqtt_publisher:
+                    self.mqtt_publisher.publish_command_result(device_id, command, {
+                        'status': 'rejected', 'reason': f'invalid limit_pct: {limit_pct}'
+                    })
+                return
+
+            try:
+                revert_timeout = int(payload.get('revert_timeout', 0))
+                ramp_time = int(payload.get('ramp_time', 0))
+            except (TypeError, ValueError) as e:
+                self.log.warning(f"MQTT command: invalid payload parameter: {e}")
+                if self.mqtt_publisher:
+                    self.mqtt_publisher.publish_command_result(device_id, command, {
+                        'status': 'rejected', 'reason': f'invalid parameter: {e}'
+                    })
+                return
+
+            cmd = PowerLimitCommand(
+                device_id=dev_id,
+                limit_pct=limit_pct,
+                revert_timeout=revert_timeout,
+                ramp_time=ramp_time,
+                source="mqtt",
+            )
+            if not self.modbus_client.device_poller.queue_power_limit_command(cmd):
+                if self.mqtt_publisher:
+                    self.mqtt_publisher.publish_command_result(device_id, command, {
+                        'status': 'rejected', 'reason': 'validation failed or queue full'
+                    })
+
+        elif command == 'restore_power_limit':
+            cmd = PowerLimitCommand(
+                device_id=dev_id,
+                limit_pct=100.0,
+                source="mqtt",
+            )
+            if not self.modbus_client.device_poller.queue_power_limit_command(cmd):
+                if self.mqtt_publisher:
+                    self.mqtt_publisher.publish_command_result(device_id, command, {
+                        'status': 'rejected', 'reason': 'validation failed or queue full'
+                    })
+        else:
+            self.log.warning(f"MQTT command: unknown command '{command}'")
+            if self.mqtt_publisher:
+                self.mqtt_publisher.publish_command_result(device_id, command, {
+                    'status': 'rejected', 'reason': f'unknown command: {command}'
+                })
+
+    def _publish_command_result(self, device_id: str, command: str, result: dict):
+        """Callback from DevicePoller to publish command results via MQTT."""
+        if self.mqtt_publisher:
+            self.mqtt_publisher.publish_command_result(device_id, command, result)
+
     def _init_modbus(self) -> bool:
         """Initialize Modbus client and connect with retry logic"""
         self.modbus_client = FroniusModbusClient(
@@ -151,7 +238,9 @@ class FroniusModbusMQTT:
             self.config.devices,
             self.register_map,
             publish_callback=self._publish_data,
-            debug_config=self.config.debug
+            debug_config=self.config.debug,
+            write_config=self.config.write,
+            command_result_callback=self._publish_command_result,
         )
 
         # Retry configuration
@@ -181,9 +270,16 @@ class FroniusModbusMQTT:
             self.log.info("MQTT publishing disabled")
             return True
 
+        # Pass command callback only if writes are enabled
+        cmd_callback = None
+        if self.config.write and self.config.write.enabled:
+            cmd_callback = self._handle_mqtt_command
+
         self.mqtt_publisher = MQTTPublisher(
             self.config.mqtt,
-            self.config.general.publish_mode
+            self.config.general.publish_mode,
+            command_callback=cmd_callback,
+            write_config=self.config.write,
         )
 
         if not self.mqtt_publisher.connect():
@@ -293,6 +389,15 @@ class FroniusModbusMQTT:
         self.log.info(f"Inverter poll delay: {self.config.devices.inverter_poll_delay}s between each")
         self.log.info(f"Data validation: {'enabled' if self.config.debug.validate_data else 'disabled'}")
         self.log.info(f"Night inverter skip: {'enabled' if self.config.modbus.night_skip_inverters else 'disabled'}")
+        if self.config.write and self.config.write.enabled:
+            self.log.warning(
+                f"Modbus WRITE enabled — power limit range: "
+                f"[{self.config.write.min_power_limit_pct}%, {self.config.write.max_power_limit_pct}%], "
+                f"rate limit: {self.config.write.rate_limit_seconds}s, "
+                f"auto-revert: {self.config.write.auto_revert_seconds}s"
+            )
+        else:
+            self.log.info("Modbus write: disabled")
 
         # Clean stale health file from previous run
         self._cleanup_health_file()
@@ -449,6 +554,12 @@ class FroniusModbusMQTT:
                 f.write(f"uptime:{self._format_uptime()}\n")
                 f.write(f"mqtt_disconnections:{mqtt_disconnections}\n")
                 f.write(f"influxdb_disconnections:{influxdb_disconnections}\n")
+                # Write stats (only if enabled)
+                if (self.config.write and self.config.write.enabled
+                        and self.modbus_client and self.modbus_client.device_poller):
+                    ws = self.modbus_client.device_poller.get_write_stats()
+                    f.write(f"writes_total:{ws['writes_total']}\n")
+                    f.write(f"writes_failed:{ws['writes_failed']}\n")
             os.replace(tmp_file, HEALTH_FILE)
         except Exception as e:
             self.log.warning(f"Failed to write health file: {e}")
@@ -462,7 +573,17 @@ class FroniusModbusMQTT:
             self.mqtt_publisher.publish_status("offline")
             time.sleep(0.5)  # Allow message to be sent
 
-        # Close connections
+        # Stop poller loop first (but keep connection alive for restore)
+        if self.modbus_client and self.modbus_client.device_poller:
+            self.modbus_client.device_poller.stop()
+            self.modbus_client.device_poller.join(timeout=10)
+
+        # Restore active power limits to 100% (safe — poller stopped, connection alive)
+        if (self.modbus_client and self.modbus_client.device_poller
+                and self.config.write and self.config.write.enabled):
+            self.modbus_client.device_poller.restore_all_power_limits()
+
+        # Close connections (skip poller stop — already done above)
         if self.modbus_client:
             self.modbus_client.disconnect()
 
@@ -480,6 +601,13 @@ class FroniusModbusMQTT:
                 f"Modbus stats: {stats['successful_reads']} reads, "
                 f"{stats['failed_reads']} failures"
             )
+            if self.modbus_client.device_poller:
+                ws = self.modbus_client.device_poller.get_write_stats()
+                if ws['writes_total'] > 0:
+                    self.log.info(
+                        f"Write stats: {ws['writes_total']} writes, "
+                        f"{ws['writes_failed']} failures"
+                    )
 
         if self.mqtt_publisher:
             stats = self.mqtt_publisher.get_stats()
