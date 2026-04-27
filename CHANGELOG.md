@@ -43,6 +43,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **MPPT Float Noise** — `_parse_mppt_module_optimized` now applies `round(result, -sf)` for negative scale factors, matching `RegisterParser.apply_scale_factor()` behavior; eliminates IEEE 754 artifacts (e.g. 5.050000000000001 → 5.05)
 - **IEEE 754 Float Noise in Scale Factors** — `RegisterParser.apply_scale_factor()` rounds results for negative scale factors to eliminate floating-point artifacts across all measurements
 - **FroniusModbusClient.disconnect() Robustness** — Tolerant to already-stopped poller (checks `is_alive()` before `join()`); explicitly disconnects poller's connection on shutdown
+- **WMaxLim_Ena Stuck on Restore** — Restoring power limit to 100% now sets `WMaxLim_Ena=0` (disabled); previously left `Ena=1` which kept inverter in THROTTLED status even at full capacity
 
 ### Changed
 - **Shutdown Sequence** — Stop poller loop → restore power limits → disconnect connections (was: restore while poller still running)

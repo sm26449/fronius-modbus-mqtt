@@ -246,6 +246,7 @@ mosquitto_pub -h broker -t 'fronius/inverter/1/cmd/restore_power_limit' -m '{}'
 - Software auto-revert: restores 100% after timeout (default 1h)
 - Hardware auto-revert: `revert_timeout` parameter sets inverter-level fallback
 - Shutdown restore: all active limits restored to 100% on graceful shutdown
+- Clean restore: `WMaxLim_Ena` set to 0 when restoring to 100% (prevents inverter staying in THROTTLED status)
 
 ### Debug & Data Validation
 
