@@ -1261,7 +1261,8 @@ class DevicePoller(threading.Thread):
 
         # Step 7: Write 5 registers atomically at 40233-40237
         # [WMaxLimPct, WMaxLimPct_WinTms, WMaxLimPct_RvrtTms, WMaxLimPct_RmpTms, WMaxLim_Ena]
-        enable_val = 1  # Enable power limiting
+        # Disable power limiting when restoring to 100% (otherwise inverter stays THROTTLED)
+        enable_val = 0 if cmd.limit_pct >= 100.0 else 1
         write_values = [raw_limit, 0, cmd.revert_timeout, cmd.ramp_time, enable_val]
 
         self.log.warning(
