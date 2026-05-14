@@ -5,6 +5,27 @@ All notable changes to Fronius Modbus MQTT will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.8.0] - 2026-05-14
+
+### Added
+- **`write.command_queue_size` config option (default 50)**
+  - Previously hardcoded `maxsize=10` on the shared command queue.
+    With multiple inverters running automated controllers (e.g. OV
+    protection in Node-RED) on bursty voltage events, 10 filled up
+    in under a minute at peak production. Bumped default to 50 to
+    give ~4 minutes of headroom before backpressure rejection kicks
+    in, and made it configurable via yaml / env (`WRITE_COMMAND_QUEUE_SIZE`).
+  - Falls back to 50 when `WriteConfig` doesn't provide the field
+    (backward-compat with older tests).
+
+### Why
+This is the collector-side complement to a Node-RED OV node dedup
+fix (`pv-stack-nodes v0.3.2`) that stopped emitting redundant
+restore_power_limit cmds on every "stale" transition. The two
+changes together eliminated the "command queue full, rejecting"
+warning storm observed during today's manual power-override
+testing.
+
 ## [1.7.0] - 2026-04-27
 
 ### Added

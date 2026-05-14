@@ -392,7 +392,13 @@ class DevicePoller(threading.Thread):
         self._night_skip_logged = False                  # Log night skip message once
 
         # Write command processing
-        self._command_queue: queue.Queue = queue.Queue(maxsize=10)
+        # Queue size honours WriteConfig.command_queue_size (default 50).
+        # Falls back to 50 when WriteConfig isn't passed (e.g. older
+        # tests) to avoid the historical maxsize=10 bottleneck.
+        _qsize = 50
+        if self.write_config and hasattr(self.write_config, 'command_queue_size'):
+            _qsize = max(1, int(self.write_config.command_queue_size or 50))
+        self._command_queue: queue.Queue = queue.Queue(maxsize=_qsize)
         self._last_write_time: Dict[int, float] = {}     # Rate limiting per device
         self._active_limits: Dict[int, dict] = {}         # Tracks active power limits
         self._auto_revert_timers: Dict[int, float] = {}   # Timestamp when to auto-revert

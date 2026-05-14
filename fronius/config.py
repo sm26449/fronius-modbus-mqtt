@@ -81,6 +81,11 @@ class WriteConfig:
     auto_revert_seconds: int = 3600       # Auto-restore 100% after 1 hour (0=disabled)
     stabilization_delay: float = 2.0      # Seconds to wait after write before next read
     command_topic_suffix: str = "cmd"     # MQTT topic suffix for commands
+    # Shared command queue size across all inverters. At rate_limit_seconds=30s
+    # × N inverters with bursty automatic controllers (e.g. OV protection
+    # firing on voltage transitions), 10 fills up quickly at peak. 50 gives
+    # ~4 minutes of headroom before backpressure rejection kicks in.
+    command_queue_size: int = 50
 
     def __post_init__(self):
         _validate_range(self.min_power_limit_pct, "write.min_power_limit_pct", 0, 100)
@@ -88,6 +93,7 @@ class WriteConfig:
         _validate_range(self.rate_limit_seconds, "write.rate_limit_seconds", 5, 3600)
         _validate_range(self.auto_revert_seconds, "write.auto_revert_seconds", 0, 86400)
         _validate_range(self.stabilization_delay, "write.stabilization_delay", 0.5, 30)
+        _validate_range(self.command_queue_size, "write.command_queue_size", 1, 1000)
         if self.min_power_limit_pct > self.max_power_limit_pct:
             raise ConfigValidationError(
                 f"write.min_power_limit_pct ({self.min_power_limit_pct}) "
@@ -413,6 +419,7 @@ class ConfigLoader:
             auto_revert_seconds=_env_get('WRITE_AUTO_REVERT', wr.get('auto_revert_seconds', 3600), int),
             stabilization_delay=_env_get('WRITE_STABILIZATION_DELAY', wr.get('stabilization_delay', 2.0), float),
             command_topic_suffix=_env_get('WRITE_COMMAND_TOPIC', wr.get('command_topic_suffix', 'cmd')),
+            command_queue_size=_env_get('WRITE_COMMAND_QUEUE_SIZE', wr.get('command_queue_size', 50), int),
         )
 
         # Parse monitoring settings
