@@ -29,14 +29,81 @@ Python application that reads data from Fronius inverters and smart meters via M
 
 ## Quick Start
 
-### 1. Clone the Repository
+> Two paths: **A.** Pull the pre-built image from GHCR (recommended — fastest, multi-arch amd64+arm64). **B.** Clone and build locally (for developers / forks).
+
+### Path A — pre-built image (recommended)
+
+The image is published on every release tag to GitHub Container Registry:
+
+```
+ghcr.io/sm26449/fronius-modbus-mqtt:1.8.0
+ghcr.io/sm26449/fronius-modbus-mqtt:1.8
+ghcr.io/sm26449/fronius-modbus-mqtt:latest
+```
+
+Minimal `docker-compose.yml`:
+
+```yaml
+services:
+  fronius-inverters:
+    image: ghcr.io/sm26449/fronius-modbus-mqtt:1.8.0
+    container_name: fronius-inverters
+    restart: unless-stopped
+    environment:
+      - MODBUS_HOST=192.168.1.100         # Fronius DataManager IP
+      - DEVICES_INVERTERS=1,2,3,4         # Comma-separated inverter Modbus IDs
+      - MQTT_ENABLED=true
+      - MQTT_BROKER=mosquitto              # MQTT broker hostname/IP
+      - INFLUXDB_ENABLED=false             # Set true and configure if you want InfluxDB
+      - MONITORING_ENABLED=true
+    ports:
+      - "8082:8080"                        # Monitoring dashboard
+    volumes:
+      - ./storage/inverters/config:/app/config
+      - ./storage/inverters/logs:/app/logs
+      - ./storage/inverters/data:/app/data
+
+  fronius-meter:
+    image: ghcr.io/sm26449/fronius-modbus-mqtt:1.8.0
+    container_name: fronius-meter
+    restart: unless-stopped
+    environment:
+      - MODBUS_HOST=192.168.1.100
+      - DEVICES_METERS=240                 # Smart-meter Modbus IDs
+      - MQTT_ENABLED=true
+      - MQTT_BROKER=mosquitto
+      - MONITORING_ENABLED=true
+    ports:
+      - "8083:8080"
+    volumes:
+      - ./storage/meter/config:/app/config
+      - ./storage/meter/logs:/app/logs
+      - ./storage/meter/data:/app/data
+```
+
+Bring it up:
+
+```bash
+mkdir -p storage/{inverters,meter}/{config,logs,data}
+# Optional: drop a fronius_modbus_mqtt.yaml in storage/*/config/ for advanced settings
+docker compose up -d
+docker logs -f fronius-inverters
+```
+
+Open `http://<host>:8082` for the monitoring dashboard.
+
+> **Note on commercial use.** The pre-built image is licensed under PolyForm Noncommercial 1.0.0. If you intend to run it in a commercial product or service, contact the author first — see [LICENSE](LICENSE) and [NOTICE](NOTICE).
+
+### Path B — clone and build locally
+
+#### 1. Clone the Repository
 
 ```bash
 git clone https://github.com/sm26449/fronius-modbus-mqtt.git
 cd fronius-modbus-mqtt
 ```
 
-### 2. Create Configuration
+#### 2. Create Configuration
 
 ```bash
 # Copy example config
@@ -56,13 +123,13 @@ mqtt:
   broker: 192.168.1.100    # MQTT broker IP
 ```
 
-### 3. Build Docker Images
+#### 3. Build Docker Images
 
 ```bash
 docker-compose build
 ```
 
-### 4. Prepare Storage Directories
+#### 4. Prepare Storage Directories
 
 **For local development/testing:**
 ```bash
@@ -97,13 +164,13 @@ sudo cp config/FroniusEventFlags.json /docker-storage/pv-stack/fronius-inverters
 sudo cp config/FroniusEventFlags.json /docker-storage/pv-stack/fronius-meter/config/
 ```
 
-### 5. Start Containers
+#### 5. Start Containers
 
 ```bash
 docker-compose up -d
 ```
 
-### 6. Verify Operation
+#### 6. Verify Operation
 
 ```bash
 # Check container status
