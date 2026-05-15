@@ -373,6 +373,16 @@ class DevicePoller(threading.Thread):
         # Track last controls read time per inverter
         self._last_controls_read: Dict[int, float] = {}
 
+        # Cache last read controls (power_limit_pct etc.) per inverter for
+        # external consumers (e.g., monitoring HTTP server) that need the live
+        # readback without triggering an out-of-band Modbus read. The same lock
+        # protects `_active_limits` accesses from foreign threads (HTTP request
+        # handlers, MQTT command callbacks) so they don't race with the poller
+        # thread that mutates the dict in `_execute_power_limit_write` and
+        # `_check_auto_revert`.
+        self._latest_controls: Dict[int, Dict] = {}
+        self._write_state_lock = threading.Lock()
+
         # Per-device runtime tracking
         self._device_runtime: Dict[str, DeviceRuntimeState] = {}
         self._runtime_lock = threading.Lock()  # Thread safety for runtime dict
@@ -826,6 +836,15 @@ class DevicePoller(threading.Thread):
             if controls_data:
                 data['controls'] = controls_data
                 self._last_controls_read[unit_id] = now
+                with self._write_state_lock:
+                    self._latest_controls[unit_id] = {
+                        'power_limit_pct': controls_data.get('power_limit_pct'),
+                        'power_limit_enabled': controls_data.get('power_limit_enabled'),
+                        'power_limit_win_tms': controls_data.get('power_limit_win_tms'),
+                        'power_limit_rvrt_tms': controls_data.get('power_limit_rvrt_tms'),
+                        'power_limit_rmp_tms': controls_data.get('power_limit_rmp_tms'),
+                        'updated_at': now,
+                    }
                 self.log.debug(f"Inverter {unit_id}: Controls - "
                               f"Conn={controls_data.get('connected')}, "
                               f"WMaxLim={controls_data.get('power_limit_pct')}%, "
@@ -1338,26 +1357,27 @@ class DevicePoller(threading.Thread):
         self._write_count += 1
 
         if result.get('status') in ('success', 'unverified'):
-            self._active_limits[device_id] = {
-                'limit_pct': cmd.limit_pct,
-                'set_at': time.time(),
-                'source': cmd.source,
-            }
-            # Set auto-revert timer (only for non-100% limits)
-            if (self.write_config.auto_revert_seconds > 0
-                    and cmd.limit_pct < 100.0
-                    and cmd.source != "auto_revert"):
-                self._auto_revert_timers[device_id] = (
-                    time.time() + self.write_config.auto_revert_seconds
-                )
-                self.log.info(
-                    f"Inverter {device_id}: auto-revert to 100% in "
-                    f"{self.write_config.auto_revert_seconds}s"
-                )
-            else:
-                # Clear auto-revert timer for 100% or auto_revert commands
-                self._auto_revert_timers.pop(device_id, None)
-                self._active_limits.pop(device_id, None)
+            with self._write_state_lock:
+                self._active_limits[device_id] = {
+                    'limit_pct': cmd.limit_pct,
+                    'set_at': time.time(),
+                    'source': cmd.source,
+                }
+                # Set auto-revert timer (only for non-100% limits)
+                if (self.write_config.auto_revert_seconds > 0
+                        and cmd.limit_pct < 100.0
+                        and cmd.source != "auto_revert"):
+                    self._auto_revert_timers[device_id] = (
+                        time.time() + self.write_config.auto_revert_seconds
+                    )
+                    self.log.info(
+                        f"Inverter {device_id}: auto-revert to 100% in "
+                        f"{self.write_config.auto_revert_seconds}s"
+                    )
+                else:
+                    # Clear auto-revert timer for 100% or auto_revert commands
+                    self._auto_revert_timers.pop(device_id, None)
+                    self._active_limits.pop(device_id, None)
 
         # Step 11: Force controls re-read on next poll cycle
         self._last_controls_read.pop(device_id, None)
@@ -1367,12 +1387,19 @@ class DevicePoller(threading.Thread):
     def _check_auto_revert(self):
         """Check for expired auto-revert timers and queue restore commands."""
         now = time.time()
-        expired = [
-            dev_id for dev_id, expires_at in self._auto_revert_timers.items()
-            if now >= expires_at
-        ]
+        with self._write_state_lock:
+            expired = [
+                dev_id for dev_id, expires_at in self._auto_revert_timers.items()
+                if now >= expires_at
+            ]
+            actives_snapshot = {
+                dev_id: dict(self._active_limits.get(dev_id, {})) for dev_id in expired
+            }
+            for device_id in expired:
+                self._auto_revert_timers.pop(device_id, None)
+
         for device_id in expired:
-            active = self._active_limits.get(device_id, {})
+            active = actives_snapshot.get(device_id, {})
             self.log.warning(
                 f"Inverter {device_id}: auto-reverting power limit to 100% "
                 f"(was {active.get('limit_pct', '?')}%, "
@@ -1387,19 +1414,38 @@ class DevicePoller(threading.Thread):
                 self._command_queue.put_nowait(cmd)
             except queue.Full:
                 self.log.error(f"Inverter {device_id}: auto-revert failed — queue full")
-            # Remove timer regardless (will be re-checked next cycle)
-            self._auto_revert_timers.pop(device_id, None)
 
     def get_write_stats(self) -> Dict:
         """Get write operation statistics."""
+        with self._write_state_lock:
+            active_copy = {
+                str(k): dict(v) for k, v in self._active_limits.items()
+            }
         return {
             'writes_total': self._write_count,
             'writes_failed': self._write_failures,
-            'active_limits': {
-                str(k): v for k, v in self._active_limits.items()
-            },
+            'active_limits': active_copy,
             'queue_size': self._command_queue.qsize(),
         }
+
+    def get_latest_controls(self, device_id: int) -> Optional[Dict]:
+        """Return cached controls (power limit etc.) for an inverter.
+
+        Thread-safe. Returns a copy; None if no controls have been read yet.
+        """
+        with self._write_state_lock:
+            entry = self._latest_controls.get(device_id)
+            return dict(entry) if entry else None
+
+    def get_active_override(self, device_id: int) -> Optional[Dict]:
+        """Return active power-limit override (set by a write) for an inverter.
+
+        None if no override is currently tracked (i.e. inverter at 100% / no recent write).
+        Thread-safe.
+        """
+        with self._write_state_lock:
+            active = self._active_limits.get(device_id)
+            return dict(active) if active else None
 
     def _poll_meter(self, device_info: Dict, max_retries: int = 3) -> bool:
         """Poll a single meter with retry on failure."""
@@ -1591,11 +1637,12 @@ class DevicePoller(threading.Thread):
 
     def restore_all_power_limits(self):
         """Restore all active power limits to 100% during shutdown."""
-        if not self._active_limits:
+        with self._write_state_lock:
+            snapshot = {k: dict(v) for k, v in self._active_limits.items()}
+        if not snapshot:
             return
 
-        for device_id in list(self._active_limits.keys()):
-            active = self._active_limits[device_id]
+        for device_id, active in snapshot.items():
             self.log.warning(
                 f"Inverter {device_id}: shutdown — restoring power limit to 100% "
                 f"(was {active.get('limit_pct', '?')}%)"

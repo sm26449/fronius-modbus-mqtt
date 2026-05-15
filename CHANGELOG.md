@@ -5,9 +5,56 @@ All notable changes to Fronius Modbus MQTT will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.8.0] - 2026-05-14
+## [1.8.0] - 2026-05-15
 
 ### Added
+- **Per-inverter power-limit control in monitoring dashboard**
+  - New `Limit` and `Control` columns in the Devices table (inverters only).
+    The Limit cell shows the live readback of `WMaxLim_Pct` and tags an
+    `OVR` badge when an active override is tracked.
+  - `Set` button per inverter opens a modal with a slider (bounded by
+    `write.min_power_limit_pct` / `max_power_limit_pct`), synchronized
+    numeric input, and an `Advanced` section for `revert_timeout` and
+    `ramp_time`. `Apply` and `Restore 100%` actions; `Esc` and backdrop
+    click close the modal.
+  - Commands are issued in-process via `queue_power_limit_command()` with
+    `source="monitoring_ui"`, so they share the same rate-limit,
+    read-back verification, and auto-revert plumbing as MQTT-driven
+    writes.
+  - New endpoints (only registered when `write.enabled=true`):
+    - `POST /api/inverter/{id}/power_limit` — body `{limit_pct, revert_timeout?, ramp_time?}`
+    - `POST /api/inverter/{id}/restore` — convenience for restoring to 100%
+    - `GET /api/data` — same payload as `?view=json`, for AJAX clients
+  - `DevicePoller` now caches the most recent controls read per inverter
+    (`get_latest_controls`, `get_active_override`) so the dashboard can
+    display the current limit without forcing an out-of-band Modbus read.
+    The dashboard exposes `controls_updated_at` per inverter and the
+    modal renders a `(read N s ago)` staleness note — important during
+    night/sleep mode when Model 123 isn't being polled.
+  - Auto-refresh is now JS-driven (was `<meta http-equiv="refresh">`) so
+    it pauses while the control modal is open or a command is in flight.
+
+### Hardening
+
+- **Thread-safe `_active_limits` access.** All mutations and reads of
+  `_active_limits` and `_auto_revert_timers` now go through a new
+  `_write_state_lock`, removing a latent race between the poller thread
+  and foreign threads (HTTP request handlers, MQTT command callback).
+  `get_write_stats`, `get_active_override`, `get_latest_controls`,
+  `_check_auto_revert`, `restore_all_power_limits` and the post-write
+  bookkeeping in `_execute_power_limit_write` all hold the lock.
+- **JSON island XSS hardening.** The embedded monitor payload runs
+  `.replace("</", "<\\/")` after `json.dumps` so any future string
+  fields can't break out of `<script type="application/json">`.
+- **Modal fetches live state on open.** Opening the control modal kicks
+  off a `GET /api/data` to refresh the live readback and override info
+  — if the dashboard was loaded minutes earlier (auto-refresh paused),
+  the modal still shows current values.
+- **Pydantic 422 errors surfaced.** The modal's error handler now
+  parses FastAPI's `detail` array so out-of-range or missing-field
+  errors render as e.g. `limit_pct: Input should be less than or equal
+  to 100` instead of a generic `HTTP 422`.
+
 - **`write.command_queue_size` config option (default 50)**
   - Previously hardcoded `maxsize=10` on the shared command queue.
     With multiple inverters running automated controllers (e.g. OV

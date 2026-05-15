@@ -8,6 +8,7 @@ Runs as a daemon thread via uvicorn — auto-dies on process exit.
 All data is read on each request (no caching).
 """
 
+import json
 import os
 import socket
 import threading
@@ -18,10 +19,19 @@ from typing import Any
 
 import psutil
 import uvicorn
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse
+from pydantic import BaseModel, Field
 
 from fronius import __version__
+from fronius.modbus_client import PowerLimitCommand
+
+
+class PowerLimitRequest(BaseModel):
+    """Body for POST /api/inverter/{id}/power_limit."""
+    limit_pct: float = Field(..., ge=0, le=100)
+    revert_timeout: int = Field(default=0, ge=0, le=3600)
+    ramp_time: int = Field(default=0, ge=0, le=600)
 
 logger = logging.getLogger("fronius_modbus_mqtt")
 
@@ -45,6 +55,33 @@ class MonitoringServer:
                 return JSONResponse(data)
             return HTMLResponse(self._render_html(data))
 
+        @api.get("/api/data")
+        async def api_data():
+            return JSONResponse(self._collect_data())
+
+        # Control endpoints only registered when writes are enabled in config.
+        # This keeps the meter container (which has no inverters) and any
+        # read-only deployment safely unable to issue commands.
+        write_cfg = self._app.config.write
+        if write_cfg and write_cfg.enabled:
+            @api.post("/api/inverter/{device_id}/power_limit")
+            async def set_power_limit(device_id: int, body: PowerLimitRequest):
+                return self._issue_power_limit(
+                    device_id=device_id,
+                    limit_pct=body.limit_pct,
+                    revert_timeout=body.revert_timeout,
+                    ramp_time=body.ramp_time,
+                )
+
+            @api.post("/api/inverter/{device_id}/restore")
+            async def restore_power_limit(device_id: int):
+                return self._issue_power_limit(
+                    device_id=device_id,
+                    limit_pct=100.0,
+                    revert_timeout=0,
+                    ramp_time=0,
+                )
+
         config = uvicorn.Config(
             api,
             host="0.0.0.0",
@@ -58,6 +95,76 @@ class MonitoringServer:
         thread = threading.Thread(target=self._server.run, name="monitoring-http", daemon=True)
         thread.start()
         logger.info(f"Monitoring server started on port {self._port}")
+
+    def _issue_power_limit(
+        self,
+        device_id: int,
+        limit_pct: float,
+        revert_timeout: int,
+        ramp_time: int,
+    ) -> JSONResponse:
+        """Validate and enqueue a power limit command from the monitoring UI.
+
+        Returns a JSON payload with status and reason. Never raises — always
+        returns a structured response so the UI can render an actionable
+        message.
+        """
+        app = self._app
+        write_cfg = app.config.write
+        if not write_cfg or not write_cfg.enabled:
+            return JSONResponse(
+                {"status": "rejected", "reason": "writes disabled in config"},
+                status_code=403,
+            )
+
+        if not app.modbus_client or not app.modbus_client.device_poller:
+            return JSONResponse(
+                {"status": "rejected", "reason": "poller not ready"},
+                status_code=503,
+            )
+
+        # Validate the device is an inverter known to this container.
+        inv_ids = {inv.get("device_id") for inv in app.modbus_client.inverters}
+        if device_id not in inv_ids:
+            return JSONResponse(
+                {"status": "rejected", "reason": f"unknown inverter id {device_id}"},
+                status_code=404,
+            )
+
+        cmd = PowerLimitCommand(
+            device_id=device_id,
+            limit_pct=float(limit_pct),
+            revert_timeout=int(revert_timeout),
+            ramp_time=int(ramp_time),
+            source="monitoring_ui",
+        )
+
+        try:
+            queued = app.modbus_client.device_poller.queue_power_limit_command(cmd)
+        except Exception as e:
+            logger.exception(f"Monitoring UI: error queuing command for inverter {device_id}")
+            return JSONResponse(
+                {"status": "error", "reason": str(e)},
+                status_code=500,
+            )
+
+        if not queued:
+            return JSONResponse(
+                {"status": "rejected", "reason": "validation failed or queue full"},
+                status_code=400,
+            )
+
+        logger.info(
+            f"Monitoring UI: queued power limit for inverter {device_id} "
+            f"({limit_pct}%, revert={revert_timeout}s, ramp={ramp_time}s)"
+        )
+        return JSONResponse({
+            "status": "queued",
+            "device_id": device_id,
+            "limit_pct": float(limit_pct),
+            "revert_timeout": int(revert_timeout),
+            "ramp_time": int(ramp_time),
+        })
 
     def _collect_data(self) -> dict:
         """Collect all runtime state from app components."""
@@ -112,6 +219,8 @@ class MonitoringServer:
             for inv in app.modbus_client.inverters:
                 dev_id = inv.get("device_id", 0)
                 rt = devices_runtime.get(f"inverter_{dev_id}", {})
+                latest_ctrls = app.modbus_client.device_poller.get_latest_controls(dev_id) or {}
+                active_override = app.modbus_client.device_poller.get_active_override(dev_id)
                 data["devices"].append({
                     "device_id": dev_id,
                     "device_type": "inverter",
@@ -123,6 +232,10 @@ class MonitoringServer:
                     "last_seen": rt.get("last_seen"),
                     "read_errors": rt.get("read_errors", 0),
                     "consecutive_errors": rt.get("consecutive_errors", 0),
+                    "power_limit_pct": latest_ctrls.get("power_limit_pct"),
+                    "power_limit_enabled": latest_ctrls.get("power_limit_enabled"),
+                    "controls_updated_at": latest_ctrls.get("updated_at"),
+                    "active_override": active_override,
                 })
 
             for mtr in app.modbus_client.meters:
@@ -177,12 +290,17 @@ class MonitoringServer:
         write_enabled = bool(app.config.write and app.config.write.enabled)
         if write_enabled and app.modbus_client and app.modbus_client.device_poller:
             ws = app.modbus_client.device_poller.get_write_stats()
+            wc = app.config.write
             data["write"] = {
                 "enabled": True,
                 "writes_total": ws.get("writes_total", 0),
                 "writes_failed": ws.get("writes_failed", 0),
                 "active_limits": ws.get("active_limits", {}),
                 "queue_size": ws.get("queue_size", 0),
+                "min_power_limit_pct": wc.min_power_limit_pct,
+                "max_power_limit_pct": wc.max_power_limit_pct,
+                "rate_limit_seconds": wc.rate_limit_seconds,
+                "auto_revert_seconds": getattr(wc, "auto_revert_seconds", 0),
             }
         else:
             data["write"] = {"enabled": write_enabled}
@@ -278,6 +396,47 @@ class MonitoringServer:
             except (ValueError, TypeError):
                 return str(iso_str)
 
+        write_enabled = bool(write.get("enabled"))
+
+        def fmt_limit_cell(d):
+            """Render the Limit column for a device row."""
+            if d.get("device_type") != "inverter":
+                return '<span style="color:#666">—</span>'
+            pct = d.get("power_limit_pct")
+            enabled = d.get("power_limit_enabled")
+            override = d.get("active_override")
+
+            if pct is None:
+                return '<span style="color:#666">—</span>'
+
+            color = "#4caf50" if pct >= 99.5 else "#ff9800" if pct >= 50 else "#e94560"
+            disabled_note = ""
+            if enabled is False:
+                disabled_note = ' <span title="WMaxLim_Ena=0" style="color:#888;font-size:0.75em">(disabled)</span>'
+            override_badge = ""
+            if override:
+                src = override.get("source", "?")
+                override_badge = (
+                    f' <span class="badge" title="Override by {src}">'
+                    f'OVR</span>'
+                )
+            return (
+                f'<span style="color:{color};font-weight:bold">{pct:.0f}%</span>'
+                f'{override_badge}{disabled_note}'
+            )
+
+        def fmt_control_cell(d):
+            """Render the Control column."""
+            if d.get("device_type") != "inverter":
+                return '<span style="color:#666">—</span>'
+            if not write_enabled:
+                return '<span title="Writes disabled in config" style="color:#666">disabled</span>'
+            return (
+                f'<button class="ctrl-btn" data-device-id="{d["device_id"]}" '
+                f'data-current-pct="{d.get("power_limit_pct") if d.get("power_limit_pct") is not None else ""}" '
+                f'type="button">Set</button>'
+            )
+
         # Devices table rows
         dev_rows = ""
         for d in devices:
@@ -291,6 +450,8 @@ class MonitoringServer:
                 <td><span style="color:{status_color};font-weight:bold">{d['status']}</span></td>
                 <td>{last_seen}</td>
                 <td>{d.get('read_errors', 0)}</td>
+                <td>{fmt_limit_cell(d)}</td>
+                <td>{fmt_control_cell(d)}</td>
             </tr>"""
 
         # Write section
@@ -314,12 +475,36 @@ class MonitoringServer:
             f'<div class="log-line">{line}</div>' for line in reversed(logs[-200:])
         )
 
+        # Payload consumed by the control modal JS. Embedded as a JSON island so
+        # we don't have to fight f-string brace escaping inside the JS source.
+        inv_payload = {}
+        for d in devices:
+            if d.get("device_type") != "inverter":
+                continue
+            inv_payload[str(d["device_id"])] = {
+                "power_limit_pct": d.get("power_limit_pct"),
+                "power_limit_enabled": d.get("power_limit_enabled"),
+                "controls_updated_at": d.get("controls_updated_at"),
+                "active_override": d.get("active_override"),
+            }
+        monitor_payload = json.dumps({
+            "write": {
+                "enabled": bool(write.get("enabled")),
+                "min_pct": write.get("min_power_limit_pct", 10.0),
+                "max_pct": write.get("max_power_limit_pct", 100.0),
+                "rate_limit_seconds": write.get("rate_limit_seconds", 30),
+                "auto_revert_seconds": write.get("auto_revert_seconds", 0),
+            },
+            "inverters": inv_payload,
+        # Defence in depth: neutralise any `</script>` sequence that could
+        # appear in future-added string fields and break out of the JSON island.
+        }).replace("</", "<\\/")
+
         html = f"""<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta http-equiv="refresh" content="30">
 <title>Fronius Monitor — {app_data['container_type']}</title>
 <style>
 * {{ margin:0; padding:0; box-sizing:border-box; }}
@@ -343,6 +528,45 @@ td {{ padding:6px 8px; border-bottom:1px solid #0f3460; }}
 .logs {{ background:#0d1117; border-radius:8px; padding:12px; max-height:700px; overflow-y:auto; font-size:0.8em; font-family:monospace; border:1px solid #0f3460; }}
 .log-line {{ padding:1px 0; white-space:pre-wrap; word-break:break-all; }}
 .sleep {{ color:#ff9800; }}
+.ctrl-btn {{ background:#0f3460; color:#e94560; border:1px solid #e94560; border-radius:4px; padding:4px 10px; font-size:0.8em; font-weight:bold; cursor:pointer; font-family:inherit; }}
+.ctrl-btn:hover {{ background:#e94560; color:#fff; }}
+.ctrl-btn:disabled {{ opacity:0.5; cursor:not-allowed; }}
+.badge {{ display:inline-block; background:#e94560; color:#fff; border-radius:3px; padding:1px 5px; font-size:0.65em; font-weight:bold; vertical-align:middle; letter-spacing:0.5px; }}
+.modal {{ position:fixed; inset:0; display:flex; align-items:center; justify-content:center; z-index:1000; padding:16px; }}
+.modal[hidden] {{ display:none; }}
+.modal-backdrop {{ position:absolute; inset:0; background:rgba(0,0,0,0.65); backdrop-filter:blur(2px); }}
+.modal-content {{ position:relative; background:#16213e; border:1px solid #0f3460; border-radius:8px; padding:20px; width:100%; max-width:480px; box-shadow:0 10px 40px rgba(0,0,0,0.5); }}
+.modal-content h2 {{ background:none; padding:0; margin:0 0 12px 0; font-size:1.1em; }}
+.modal-section {{ background:#0d1117; border-radius:6px; padding:10px 12px; margin-bottom:12px; font-size:0.85em; }}
+.modal-section .row {{ display:flex; justify-content:space-between; padding:2px 0; }}
+.modal-section .row span:first-child {{ color:#888; }}
+.modal-section .row span:last-child {{ font-weight:bold; }}
+.form-row {{ margin-bottom:12px; }}
+.form-row label {{ display:block; color:#aaa; font-size:0.8em; margin-bottom:4px; text-transform:uppercase; letter-spacing:0.5px; }}
+.slider-row {{ display:flex; gap:10px; align-items:center; }}
+.slider-row input[type=range] {{ flex:1; accent-color:#e94560; }}
+.slider-row input[type=number] {{ width:70px; }}
+input[type=number] {{ background:#0d1117; color:#e0e0e0; border:1px solid #0f3460; border-radius:4px; padding:6px 8px; font-family:inherit; font-size:0.9em; }}
+input[type=number]:focus {{ outline:none; border-color:#e94560; }}
+details.advanced {{ background:#0d1117; border-radius:6px; padding:8px 12px; margin-bottom:12px; }}
+details.advanced summary {{ cursor:pointer; color:#aaa; font-size:0.85em; user-select:none; }}
+details.advanced[open] summary {{ margin-bottom:8px; }}
+.modal-actions {{ display:flex; gap:8px; justify-content:flex-end; margin-top:8px; }}
+.btn {{ border:none; border-radius:4px; padding:8px 16px; font-family:inherit; font-size:0.9em; font-weight:bold; cursor:pointer; }}
+.btn:disabled {{ opacity:0.5; cursor:wait; }}
+.btn-primary {{ background:#e94560; color:#fff; }}
+.btn-primary:hover:not(:disabled) {{ background:#ff5470; }}
+.btn-warning {{ background:#0f3460; color:#ff9800; border:1px solid #ff9800; }}
+.btn-warning:hover:not(:disabled) {{ background:#ff9800; color:#16213e; }}
+.btn-ghost {{ background:transparent; color:#888; }}
+.btn-ghost:hover:not(:disabled) {{ color:#e0e0e0; }}
+.modal-msg {{ padding:8px 10px; border-radius:4px; font-size:0.85em; margin-bottom:10px; }}
+.modal-msg[hidden] {{ display:none; }}
+.modal-msg.success {{ background:rgba(76,175,80,0.15); color:#4caf50; border:1px solid #4caf50; }}
+.modal-msg.error {{ background:rgba(244,67,54,0.15); color:#f44336; border:1px solid #f44336; }}
+.toast {{ position:fixed; bottom:20px; right:20px; background:#16213e; border:1px solid #0f3460; border-left:4px solid #4caf50; color:#e0e0e0; padding:12px 18px; border-radius:6px; box-shadow:0 4px 20px rgba(0,0,0,0.4); z-index:2000; font-size:0.9em; max-width:360px; }}
+.toast.error {{ border-left-color:#f44336; }}
+.toast[hidden] {{ display:none; }}
 </style>
 </head>
 <body>
@@ -405,8 +629,8 @@ td {{ padding:6px 8px; border-bottom:1px solid #0f3460; }}
 <div class="card" style="margin-bottom:16px">
     <h2>Devices ({len(devices)})</h2>
     <table>
-        <tr><th>ID</th><th>Type</th><th>Model</th><th>Serial</th><th>Status</th><th>Last Seen</th><th>Errors</th></tr>
-        {dev_rows if dev_rows else '<tr><td colspan="7" style="color:#666;text-align:center">No devices discovered</td></tr>'}
+        <tr><th>ID</th><th>Type</th><th>Model</th><th>Serial</th><th>Status</th><th>Last Seen</th><th>Errors</th><th>Limit</th><th>Control</th></tr>
+        {dev_rows if dev_rows else '<tr><td colspan="9" style="color:#666;text-align:center">No devices discovered</td></tr>'}
     </table>
 </div>
 
@@ -416,6 +640,273 @@ td {{ padding:6px 8px; border-bottom:1px solid #0f3460; }}
         {log_html if log_html else '<div style="color:#666">No log entries</div>'}
     </div>
 </div>
+
+<div id="ctrlModal" class="modal" hidden role="dialog" aria-modal="true" aria-labelledby="ctrlModalTitle">
+    <div class="modal-backdrop" data-close></div>
+    <div class="modal-content">
+        <h2 id="ctrlModalTitle">Set Power Limit — Inverter <span id="ctrlDevId"></span></h2>
+        <div class="modal-section">
+            <div class="row"><span>Live readback</span><span id="ctrlLiveValue">—</span></div>
+            <div class="row" id="ctrlOverrideRow" hidden><span>Active override</span><span id="ctrlOverrideValue">—</span></div>
+        </div>
+        <div class="form-row">
+            <label for="ctrlSlider">Power limit (%)</label>
+            <div class="slider-row">
+                <input type="range" id="ctrlSlider" min="10" max="100" value="100" step="1">
+                <input type="number" id="ctrlSliderNum" min="10" max="100" value="100" step="1">
+            </div>
+        </div>
+        <details class="advanced">
+            <summary>Advanced — auto-revert timer &amp; ramp</summary>
+            <div class="form-row" style="margin-top:8px">
+                <label for="ctrlRevert">Revert timeout (s) — 0 = no inverter-side auto-revert</label>
+                <input type="number" id="ctrlRevert" min="0" max="3600" value="0" step="1">
+            </div>
+            <div class="form-row" style="margin-bottom:4px">
+                <label for="ctrlRamp">Ramp time (s) — gradual transition</label>
+                <input type="number" id="ctrlRamp" min="0" max="600" value="0" step="1">
+            </div>
+            <div id="ctrlAutoRevertHint" style="color:#888;font-size:0.75em;margin-top:6px"></div>
+        </details>
+        <div id="ctrlMessage" class="modal-msg" hidden></div>
+        <div class="modal-actions">
+            <button id="ctrlCancel" class="btn btn-ghost" type="button" data-close>Cancel</button>
+            <button id="ctrlRestore" class="btn btn-warning" type="button">Restore 100%</button>
+            <button id="ctrlApply" class="btn btn-primary" type="button">Apply</button>
+        </div>
+    </div>
+</div>
+
+<div id="toast" class="toast" hidden></div>
+
+<script id="monitor-data" type="application/json">{monitor_payload}</script>
+<script>
+(function() {{
+    var data;
+    try {{
+        data = JSON.parse(document.getElementById('monitor-data').textContent);
+    }} catch (e) {{
+        console.error('Failed to parse monitor payload', e);
+        data = {{ write: {{ enabled: false }}, inverters: {{}} }};
+    }}
+
+    var wcfg = data.write || {{}};
+    var modal = document.getElementById('ctrlModal');
+    var slider = document.getElementById('ctrlSlider');
+    var sliderNum = document.getElementById('ctrlSliderNum');
+    var revertInput = document.getElementById('ctrlRevert');
+    var rampInput = document.getElementById('ctrlRamp');
+    var devIdSpan = document.getElementById('ctrlDevId');
+    var liveSpan = document.getElementById('ctrlLiveValue');
+    var ovrRow = document.getElementById('ctrlOverrideRow');
+    var ovrSpan = document.getElementById('ctrlOverrideValue');
+    var msgBox = document.getElementById('ctrlMessage');
+    var applyBtn = document.getElementById('ctrlApply');
+    var restoreBtn = document.getElementById('ctrlRestore');
+    var cancelBtn = document.getElementById('ctrlCancel');
+    var autoRevertHint = document.getElementById('ctrlAutoRevertHint');
+    var toast = document.getElementById('toast');
+    var currentDeviceId = null;
+    var inFlight = false;
+
+    if (slider && wcfg.enabled) {{
+        slider.min = wcfg.min_pct;
+        slider.max = wcfg.max_pct;
+        sliderNum.min = wcfg.min_pct;
+        sliderNum.max = wcfg.max_pct;
+    }}
+
+    if (autoRevertHint && wcfg.auto_revert_seconds) {{
+        autoRevertHint.textContent = 'Note: a global auto-revert to 100% will fire after ' +
+            wcfg.auto_revert_seconds + 's regardless of the revert timeout above.';
+    }}
+
+    function showToast(msg, type) {{
+        toast.textContent = msg;
+        toast.className = 'toast' + (type === 'error' ? ' error' : '');
+        toast.hidden = false;
+        setTimeout(function() {{ toast.hidden = true; }}, 4000);
+    }}
+
+    function setMsg(text, type) {{
+        if (!text) {{ msgBox.hidden = true; return; }}
+        msgBox.textContent = text;
+        msgBox.className = 'modal-msg ' + (type || 'success');
+        msgBox.hidden = false;
+    }}
+
+    function syncSlider(src) {{
+        var v = parseInt(src.value, 10);
+        if (isNaN(v)) v = 100;
+        if (v < parseInt(slider.min, 10)) v = parseInt(slider.min, 10);
+        if (v > parseInt(slider.max, 10)) v = parseInt(slider.max, 10);
+        slider.value = v;
+        sliderNum.value = v;
+    }}
+    slider.addEventListener('input', function() {{ syncSlider(slider); }});
+    sliderNum.addEventListener('input', function() {{ syncSlider(sliderNum); }});
+
+    function renderInverterState(inv) {{
+        var live = inv.power_limit_pct;
+        var staleNote = '';
+        if (inv.controls_updated_at) {{
+            var ageS = Math.max(0, Math.round(Date.now() / 1000 - inv.controls_updated_at));
+            if (ageS >= 60) staleNote = ' (read ' + Math.round(ageS / 60) + 'm ago)';
+            else if (ageS >= 5) staleNote = ' (read ' + ageS + 's ago)';
+        }}
+        liveSpan.textContent = (live == null) ? '— (not yet read)' :
+            (Math.round(live * 10) / 10) + '%' +
+            (inv.power_limit_enabled === false ? ' (WMaxLim_Ena=0)' : '') +
+            staleNote;
+        if (inv.active_override) {{
+            var ovr = inv.active_override;
+            var ageSec = ovr.set_at ? Math.max(0, Math.round(Date.now() / 1000 - ovr.set_at)) : null;
+            ovrSpan.textContent = ovr.limit_pct + '% via ' + ovr.source +
+                (ageSec != null ? ' (' + ageSec + 's ago)' : '');
+            ovrRow.hidden = false;
+        }} else {{
+            ovrRow.hidden = true;
+        }}
+    }}
+
+    function openModal(devId) {{
+        currentDeviceId = devId;
+        devIdSpan.textContent = devId;
+        var inv = (data.inverters || {{}})[String(devId)] || {{}};
+        renderInverterState(inv);
+        var initial = (inv.power_limit_pct != null) ? Math.round(inv.power_limit_pct) : 100;
+        slider.value = initial;
+        sliderNum.value = initial;
+        revertInput.value = 0;
+        rampInput.value = 0;
+        setMsg(null);
+        applyBtn.disabled = false;
+        restoreBtn.disabled = false;
+        modal.hidden = false;
+        setTimeout(function() {{ sliderNum.focus(); sliderNum.select(); }}, 50);
+
+        // Refresh live + override values in case page payload is stale (modal
+        // could have been opened minutes after page load).
+        fetch('/api/data').then(function(r) {{ return r.json(); }}).then(function(d) {{
+            if (currentDeviceId !== devId) return;  // user moved on
+            var freshInv = null;
+            for (var i = 0; i < (d.devices || []).length; i++) {{
+                var dev = d.devices[i];
+                if (dev.device_type === 'inverter' && String(dev.device_id) === String(devId)) {{
+                    freshInv = dev; break;
+                }}
+            }}
+            if (freshInv) {{
+                data.inverters[String(devId)] = freshInv;
+                renderInverterState(freshInv);
+            }}
+        }}).catch(function() {{ /* ignore refresh failure — modal still usable */ }});
+    }}
+
+    function closeModal() {{
+        modal.hidden = true;
+        currentDeviceId = null;
+        setMsg(null);
+    }}
+
+    document.querySelectorAll('.ctrl-btn').forEach(function(btn) {{
+        btn.addEventListener('click', function() {{
+            openModal(btn.dataset.deviceId);
+        }});
+    }});
+
+    modal.querySelectorAll('[data-close]').forEach(function(el) {{
+        el.addEventListener('click', function() {{ if (!inFlight) closeModal(); }});
+    }});
+
+    document.addEventListener('keydown', function(e) {{
+        if (e.key === 'Escape' && !modal.hidden && !inFlight) closeModal();
+    }});
+
+    function postJSON(url, body) {{
+        return fetch(url, {{
+            method: 'POST',
+            headers: body ? {{ 'Content-Type': 'application/json' }} : {{}},
+            body: body ? JSON.stringify(body) : undefined,
+        }}).then(function(r) {{
+            return r.json().then(function(j) {{ return {{ ok: r.ok, status: r.status, body: j }}; }});
+        }});
+    }}
+
+    function extractReason(res) {{
+        var b = res.body;
+        if (!b) return 'HTTP ' + res.status;
+        if (b.reason) return b.reason;
+        // FastAPI/Pydantic 422 returns a `detail` array of validation issues.
+        if (Array.isArray(b.detail) && b.detail.length) {{
+            return b.detail.map(function(d) {{
+                var loc = Array.isArray(d.loc) ? d.loc.slice(-1)[0] : '';
+                return (loc ? loc + ': ' : '') + (d.msg || JSON.stringify(d));
+            }}).join('; ');
+        }}
+        if (typeof b.detail === 'string') return b.detail;
+        return 'HTTP ' + res.status;
+    }}
+
+    function handleResult(res, successVerb) {{
+        if (res.ok && res.body.status === 'queued') {{
+            setMsg('Command queued: ' + successVerb + ' to ' + res.body.limit_pct + '%. Reloading…', 'success');
+            showToast('Command queued — inverter ' + res.body.device_id + ' → ' + res.body.limit_pct + '%');
+            setTimeout(function() {{ location.reload(); }}, 1500);
+        }} else {{
+            var reason = extractReason(res);
+            setMsg('Rejected: ' + reason, 'error');
+            showToast('Command rejected: ' + reason, 'error');
+            applyBtn.disabled = false;
+            restoreBtn.disabled = false;
+            inFlight = false;
+        }}
+    }}
+
+    applyBtn.addEventListener('click', function() {{
+        if (inFlight || currentDeviceId == null) return;
+        inFlight = true;
+        applyBtn.disabled = true;
+        restoreBtn.disabled = true;
+        setMsg('Sending…', 'success');
+        var pct = parseFloat(sliderNum.value);
+        var body = {{
+            limit_pct: pct,
+            revert_timeout: parseInt(revertInput.value, 10) || 0,
+            ramp_time: parseInt(rampInput.value, 10) || 0,
+        }};
+        postJSON('/api/inverter/' + currentDeviceId + '/power_limit', body)
+            .then(function(res) {{ handleResult(res, 'set limit'); }})
+            .catch(function(err) {{
+                setMsg('Network error: ' + err, 'error');
+                applyBtn.disabled = false;
+                restoreBtn.disabled = false;
+                inFlight = false;
+            }});
+    }});
+
+    restoreBtn.addEventListener('click', function() {{
+        if (inFlight || currentDeviceId == null) return;
+        inFlight = true;
+        applyBtn.disabled = true;
+        restoreBtn.disabled = true;
+        setMsg('Sending restore…', 'success');
+        postJSON('/api/inverter/' + currentDeviceId + '/restore', null)
+            .then(function(res) {{ handleResult(res, 'restore'); }})
+            .catch(function(err) {{
+                setMsg('Network error: ' + err, 'error');
+                applyBtn.disabled = false;
+                restoreBtn.disabled = false;
+                inFlight = false;
+            }});
+    }});
+
+    // Auto-refresh every 30s, but only while modal is closed and no request is in flight
+    setInterval(function() {{
+        if (modal.hidden && !inFlight) location.reload();
+    }}, 30000);
+}})();
+</script>
 </body>
 </html>"""
         return html

@@ -1,6 +1,6 @@
 # Fronius Modbus MQTT
 
-[![Version](https://img.shields.io/badge/version-1.7.0-blue.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-1.8.0-blue.svg)](CHANGELOG.md)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
 Python application that reads data from Fronius inverters and smart meters via Modbus TCP and publishes to MQTT and/or InfluxDB.
@@ -12,7 +12,7 @@ Python application that reads data from Fronius inverters and smart meters via M
 - **Home Assistant Integration** - MQTT autodiscovery for automatic entity creation
 - **Runtime Monitoring** - Per-device online/offline status, read error counters, uptime tracking
 - **MPPT Data** - Per-string voltage, current, and power (Model 160)
-- **Power Limit Control** - Write inverter power limits via MQTT commands (Model 123) with 11-step safety protocol
+- **Power Limit Control** - Write inverter power limits with 11-step safety protocol — issue commands from the dashboard modal, via MQTT, or via the HTTP API ([reference](docs/POWER_LIMIT_CONTROL.md))
 - **Immediate Controls** - Read inverter control settings (Model 123)
 - **Event Parsing** - Decode Fronius event flags with human-readable descriptions
 - **Data Validation** - Automatic detection and reconciliation of DataManager buffer corruption using MPPT as ground truth
@@ -21,7 +21,7 @@ Python application that reads data from Fronius inverters and smart meters via M
 - **Connection Resilience** - Persistent reconnection monitoring, proactive health checks, data loss prevention
 - **Diagnostic Debug System** - Configurable logging for register values, scale factors, status transitions, and corruption events
 - **Security Hardened** - Non-root container, optional TLS/SSL, secret masking in logs
-- **Monitoring Dashboard** - Built-in HTTP server with dark-theme HTML dashboard and JSON API
+- **Monitoring Dashboard** - Built-in HTTP server with dark-theme HTML dashboard, JSON API and per-inverter control modal ([reference](docs/MONITORING.md))
 - **Publish Modes** - Publish on change or publish all values
 - **Docker Support** - Separate containers for inverters and meters
 - **MQTT Integration** - Publish to any MQTT broker with configurable topics and LWT
@@ -192,66 +192,43 @@ influxdb:
 
 ### Power Limit Control
 
-> **CAUTION**: This feature writes to inverter Modbus registers. Incorrect use can affect inverter operation. Disabled by default — must be explicitly enabled.
+> **CAUTION**: writes to inverter Modbus registers. Disabled by default. **Full reference: [docs/POWER_LIMIT_CONTROL.md](docs/POWER_LIMIT_CONTROL.md).**
 
 ```yaml
 write:
-  enabled: false                # Must explicitly enable
-  min_power_limit_pct: 10       # Safety floor: never limit below 10%
+  enabled: false                # Master switch (default false)
+  min_power_limit_pct: 10       # Safety floor
   max_power_limit_pct: 100      # Safety ceiling
-  rate_limit_seconds: 30        # Min time between writes per device
-  auto_revert_seconds: 3600     # Auto-restore 100% after 1h (0=disabled)
-  stabilization_delay: 2.0      # Wait after write before next read
+  rate_limit_seconds: 30        # Min interval between writes per device
+  auto_revert_seconds: 3600     # Auto-restore 100% after this many seconds
+  stabilization_delay: 2.0      # Sleep after write before read-back
+  command_queue_size: 50        # Shared queue capacity
 ```
 
-**MQTT Command Topics** (QoS 1):
+Three control surfaces — all routed through the same 11-step safety protocol (range validation, rate limit, pre-read, write, stabilization, post-read verification, tracking, auto-revert):
 
-| Topic | Payload | Description |
-|-------|---------|-------------|
-| `fronius/inverter/{id}/cmd/set_power_limit` | `{"limit_pct": 50}` | Set power limit to 50% |
-| `fronius/inverter/{id}/cmd/set_power_limit` | `{"limit_pct": 50, "revert_timeout": 1800, "ramp_time": 10}` | With hardware revert (30min) and ramp |
-| `fronius/inverter/{id}/cmd/restore_power_limit` | `{}` | Restore to 100% (shortcut) |
+| Surface | Use it for |
+|---|---|
+| Dashboard modal (**Set** button per inverter) | Manual override / diagnostics |
+| MQTT `fronius/inverter/{id}/cmd/set_power_limit` (QoS 1) | Automation (Node-RED, HA, scripts) |
+| HTTP `POST /api/inverter/{id}/power_limit` | Programmatic / curl-from-shell |
 
-**Result Topic**: `fronius/inverter/{id}/cmd/result`
-```json
-{
-  "command": "set_power_limit",
-  "status": "success",
-  "device_id": 1,
-  "before": {"limit_pct": 100.0, "enabled": true},
-  "after": {"limit_pct": 50.0, "enabled": true},
-  "timestamp": "2026-04-27T14:30:00"
-}
-```
-
-**Usage Examples:**
 ```bash
-# Set inverter 1 to 50% power
+# MQTT
 mosquitto_pub -h broker -t 'fronius/inverter/1/cmd/set_power_limit' -m '{"limit_pct": 50}'
-
-# Set with hardware revert timeout (inverter restores 100% after 30min even if software fails)
-mosquitto_pub -h broker -t 'fronius/inverter/1/cmd/set_power_limit' \
-  -m '{"limit_pct": 70, "revert_timeout": 1800, "ramp_time": 5}'
-
-# Restore to 100%
 mosquitto_pub -h broker -t 'fronius/inverter/1/cmd/restore_power_limit' -m '{}'
+
+# HTTP
+curl -X POST http://localhost:8082/api/inverter/1/power_limit \
+  -H 'Content-Type: application/json' -d '{"limit_pct": 50}'
+curl -X POST http://localhost:8082/api/inverter/1/restore
 ```
 
-**Safety Measures:**
-- Disabled by default — requires `write.enabled: true`
-- All writes go through the existing polling connection (no separate connections)
-- Rate limited: minimum 30s between writes per device
-- Range validation: configurable floor (default 10%) and ceiling (default 100%)
-- Connection reset + pre-write verification before every write
-- Post-write read-back confirms the value was applied
-- Software auto-revert: restores 100% after timeout (default 1h)
-- Hardware auto-revert: `revert_timeout` parameter sets inverter-level fallback
-- Shutdown restore: all active limits restored to 100% on graceful shutdown
-- Clean restore: `WMaxLim_Ena` set to 0 when restoring to 100% (prevents inverter staying in THROTTLED status)
+Result stream is published to `fronius/inverter/{id}/cmd/result` for every command regardless of surface. See [docs/POWER_LIMIT_CONTROL.md](docs/POWER_LIMIT_CONTROL.md) for payload schemas, status codes, troubleshooting and the dual auto-revert design.
 
 ### Monitoring Dashboard
 
-Built-in HTTP server for runtime observability. Provides an HTML dashboard with auto-refresh and a JSON API for programmatic access.
+Built-in HTTP server for runtime observability. Dark-theme HTML dashboard, JSON API, and an interactive **per-inverter control modal** for ad-hoc power-limit overrides. Full reference: **[docs/MONITORING.md](docs/MONITORING.md)**.
 
 ```yaml
 monitoring:
@@ -259,11 +236,13 @@ monitoring:
   port: 8080
 ```
 
-**Endpoints:**
-- `GET /` — HTML dashboard (auto-refresh 30s)
-- `GET /?view=json` — JSON API with all runtime state
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/` | HTML dashboard (JS-driven auto-refresh, pauses while the modal is open) |
+| `GET` | `/api/data` | Full runtime JSON snapshot |
+| `POST` | `/api/inverter/{id}/power_limit` | Set power limit (only when `write.enabled=true`) |
+| `POST` | `/api/inverter/{id}/restore` | Restore to 100% |
 
-**Docker port mapping:**
 ```yaml
 ports:
   - "8082:8080"    # inverters
@@ -273,6 +252,10 @@ environment:
 ```
 
 ![Monitoring Dashboard](docs/monitoring-dashboard.png)
+
+Click **Set** in the Control column of any inverter row to open the power-limit modal:
+
+![Control Modal](docs/monitoring-control-modal-zoom.png)
 
 ### Debug & Data Validation
 
