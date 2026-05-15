@@ -1,0 +1,70 @@
+fronius-modbus-mqtt
+Copyright (c) 2024-2026 Stefan M (stefan.maldaianu@gmail.com)
+https://github.com/sm26449/fronius-modbus-mqtt
+
+This software is licensed under PolyForm Noncommercial 1.0.0 — see LICENSE.
+
+================================================================================
+NONCOMMERCIAL USE
+================================================================================
+
+Personal, research, educational, and noncommercial-organization use is
+permitted under the terms of LICENSE. Examples of permitted use:
+
+  - Homeowners monitoring or controlling their own PV system.
+  - Hobbyists, makers, students.
+  - Charitable, educational, public research, public-safety, health,
+    environmental-protection or government institutions.
+
+You may modify the software and redistribute it under the same terms; any
+copy you distribute must include this NOTICE file and the LICENSE file.
+
+================================================================================
+COMMERCIAL USE — SEPARATE LICENSE REQUIRED
+================================================================================
+
+Commercial use is NOT permitted under LICENSE. "Commercial use" includes,
+without limitation:
+
+  - Embedding the software in a paid product or service.
+  - Operating the software as part of a paid hosting, SaaS, monitoring or
+    energy-management service for third-party customers.
+  - Using the software in connection with any revenue-generating business
+    operation.
+
+If you wish to use this software commercially, contact the author to obtain a
+separate written commercial license:
+
+  Stefan M
+  stefan.maldaianu@gmail.com
+
+A commercial license MAY be granted at the author's sole discretion. Any
+commercial license issued WILL require, at minimum, the following
+attribution to be displayed clearly and prominently in the user-facing
+documentation and/or "About" / "Credits" section of the commercial product
+or service:
+
+    This product/service uses fronius-modbus-mqtt
+    (https://github.com/sm26449/fronius-modbus-mqtt)
+    by Stefan M, under separate commercial license.
+
+The attribution must be visible to end users without requiring them to read
+source code, decompile the product, or inspect license metadata files.
+
+The author reserves the right to set additional commercial terms (fees,
+support obligations, restrictions on derivative resale, etc.) on a
+case-by-case basis.
+
+================================================================================
+RELATIONSHIP TO PRIOR MIT RELEASES
+================================================================================
+
+Versions of this software distributed before the license change (commits
+prior to the LICENSE-change commit in the repository history, including
+any forks made before that commit) were licensed under the MIT License.
+Users who obtained the software under MIT may continue to use those
+specific versions under MIT terms.
+
+All commits, releases and binary artifacts from the LICENSE-change commit
+onward (including v1.8.0 and later) are licensed under PolyForm
+Noncommercial 1.0.0 with the additional terms in this NOTICE file.

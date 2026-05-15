@@ -1,7 +1,7 @@
 # Fronius Modbus MQTT
 
 [![Version](https://img.shields.io/badge/version-1.8.0-blue.svg)](CHANGELOG.md)
-[![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+[![License](https://img.shields.io/badge/license-PolyForm%20Noncommercial%201.0.0-orange.svg)](LICENSE)
 
 Python application that reads data from Fronius inverters and smart meters via Modbus TCP and publishes to MQTT and/or InfluxDB.
 
@@ -658,27 +658,27 @@ Found a bug or have a feature request? Please open an issue on [GitHub Issues](h
 
 ## License
 
-MIT License - Free and open source software.
+**PolyForm Noncommercial 1.0.0** — see [LICENSE](LICENSE) for the full text and [NOTICE](NOTICE) for additional terms.
 
-Copyright (c) 2024-2026 Stefan M <sm26449@diysolar.ro>
+Copyright (c) 2024-2026 Stefan M ([stefan.maldaianu@gmail.com](mailto:stefan.maldaianu@gmail.com))
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+### Permitted use (free)
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
+- **Personal** — homeowners running this on their own PV system, hobbyists, makers, students.
+- **Research / education** — universities, research labs, schools.
+- **Noncommercial organizations** — charities, public-safety, health, environmental, government institutions.
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+You can copy, modify and redistribute the software for these purposes; any copy you redistribute must carry the [LICENSE](LICENSE) and [NOTICE](NOTICE) files.
+
+### Commercial use — separate license required
+
+Commercial use is **not permitted** under the LICENSE. This includes embedding the software in a paid product or service, operating it as part of a paid SaaS / hosted monitoring service, or using it in any revenue-generating business operation.
+
+If you want to use this software commercially, contact the author at [stefan.maldaianu@gmail.com](mailto:stefan.maldaianu@gmail.com) to obtain a separate written commercial license. Any commercial license issued will require, at minimum, **clear and prominent end-user attribution**:
+
+> This product/service uses fronius-modbus-mqtt (https://github.com/sm26449/fronius-modbus-mqtt) by Stefan M, under separate commercial license.
+
+See [NOTICE](NOTICE) for the full commercial-use terms and the relationship to prior MIT-licensed releases.
 
 ---
 

@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [1.8.0] - 2026-05-15
 
+### Changed
+
+- **License changed from MIT to PolyForm Noncommercial 1.0.0.** Personal,
+  research, educational and noncommercial-organization use remains free.
+  Commercial use requires a separate written license from the author and
+  carries an attribution requirement — see [NOTICE](NOTICE) for the full
+  terms. Releases prior to this commit remain under MIT for users who
+  obtained them at that time.
+
 ### Added
 - **Per-inverter power-limit control in monitoring dashboard**
   - New `Limit` and `Control` columns in the Devices table (inverters only).
