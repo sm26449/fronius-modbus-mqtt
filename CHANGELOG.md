@@ -5,6 +5,40 @@ All notable changes to Fronius Modbus MQTT will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.9.0] - 2026-06-22
+
+### Added
+
+- **Fronius vendor operating-state (`StVnd`) decoding.** The vendor status
+  register (40109) now resolves to the full 1–13 operating-state enum, including
+  the Fronius extensions `9` No SolarNet, `10` No communication with inverter,
+  `11` SolarNet overcurrent, `12` Bootloading, and `13` AFCI Event.
+- **Model-aware event-flag decoding.** `RegisterParser.model_to_variant()` maps
+  the inverter model string to its `EvtVnd` bit map (`symo` / `primo` / `galvo` /
+  `igplus`, falling back to `all`); `modbus_client` derives it from the device
+  model so Symo units use the Symo map (which carries the DC-insulation and AFCI
+  bits) instead of the generic one.
+- **Raw `EvtVnd` event bitfields historised to InfluxDB.** `evt1`, `evt2`, and
+  `evt_vnd1..4` are written as integer fields when non-zero, leaving a queryable
+  numeric fingerprint for faults even when a vendor bit is not yet mapped.
+- **Vendored Fronius Modbus reference** under
+  [`docs/fronius-reference/`](docs/fronius-reference/README.md): official
+  register-map PDF, state-code & event-flag tables (`St`, `StVnd`, Symo state
+  codes, `EvtVnd1-4`), and the smart-meter register maps — the source of truth
+  for `config/registers.json` and `config/FroniusEventFlags.json`.
+
+### Fixed
+
+- **`StVnd` was decoded against the wrong table.** It was looked up in the
+  numeric fault-code catalog (102, 475, …) and so always returned `UNKNOWN` for
+  real values such as `10`. `StVnd` is an operating *state* (1–13), not a fault
+  code — fault codes live in the `EvtVnd` bitfields. `config/registers.json`
+  `status_codes.StVnd` now holds the operating-state map.
+- **The `symo` event-flag map was incomplete.** It was missing 16 bits versus the
+  authoritative `EvtVnd1-4_Symo.csv`, including `EvtVnd1` bit `0x1` (*DC Insulation
+  fault* → state codes `447, 475, 502`) and several AFCI / grounding bits.
+  Rebuilt in full (`EvtVnd1` 32, `EvtVnd2` 32, `EvtVnd3` 4 bits).
+
 ## [1.8.0] - 2026-05-15
 
 ### Changed

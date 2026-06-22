@@ -14,7 +14,7 @@ Python application that reads data from Fronius inverters and smart meters via M
 - **MPPT Data** - Per-string voltage, current, and power (Model 160)
 - **Power Limit Control** - Write inverter power limits with 11-step safety protocol — issue commands from the dashboard modal, via MQTT, or via the HTTP API ([reference](docs/POWER_LIMIT_CONTROL.md))
 - **Immediate Controls** - Read inverter control settings (Model 123)
-- **Event Parsing** - Decode Fronius event flags with human-readable descriptions
+- **Event & State Decoding** - SunSpec operating state (`St`), Fronius vendor state (`StVnd` 1–13, incl. AFCI / no-comm), and **model-specific** `EvtVnd` event flags decoded to human-readable fault codes (DC insulation, arc detection, …). Vendor docs vendored under [docs/fronius-reference/](docs/fronius-reference/README.md)
 - **Data Validation** - Automatic detection and reconciliation of DataManager buffer corruption using MPPT as ground truth
 - **Night Mode** - Automatic sleep detection when inverters go offline at night
 - **Night Inverter Skip** - Skip inverter polling during night hours (DataManager returns stale data from sleeping inverters)

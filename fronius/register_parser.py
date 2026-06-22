@@ -422,6 +422,23 @@ class RegisterParser:
                 })
         return decoded
 
+    @staticmethod
+    def model_to_variant(model: str) -> str:
+        """Map a Fronius model string to its event-flag variant key.
+
+        The Symo / Primo / Galvo / IG-Plus families have distinct EvtVnd bit
+        maps in FroniusEventFlags.json (e.g. the Symo map carries the DC
+        insulation + AFCI bits). 'all' is the generic fallback when the model
+        string matches none.
+        """
+        m = (model or '').lower()
+        for variant in ('symo', 'primo', 'galvo'):
+            if variant in m:
+                return variant
+        if 'igplus' in m or 'ig plus' in m or 'ig-plus' in m:
+            return 'igplus'
+        return 'all'
+
     def parse_event_flags(self, evt_vnd1: int, evt_vnd2: int, evt_vnd3: int,
                           evt_vnd4: int = 0, inverter_type: str = 'all') -> List[Dict]:
         """

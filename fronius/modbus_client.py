@@ -803,8 +803,10 @@ class DevicePoller(threading.Thread):
             self.parser.parse_vendor_status(vendor_code)
         data['is_active'] = data.get('status_code', 0) in self.ACTIVE_STATUS_CODES
 
-        # Parse events
-        inverter_type = device_info.get('inverter_type', 'all')
+        # Parse events — pick the model-specific EvtVnd map (Symo carries the
+        # DC-insulation + AFCI bits that the generic 'all' map differs on).
+        inverter_type = device_info.get('inverter_type') or \
+            self.parser.model_to_variant(data.get('model', ''))
         data['events'] = self.parser.parse_event_flags(
             data.get('evt_vnd1', 0),
             data.get('evt_vnd2', 0),

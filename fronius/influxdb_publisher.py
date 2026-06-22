@@ -389,6 +389,19 @@ class InfluxDBPublisher:
                         })
                     point = point.field("events_json", json.dumps(evt_summary))
 
+            # Raw event bitfields (uint32) — numeric fingerprint for faults.
+            # Evt1/Evt2 are the standard SunSpec event registers (40112-40115);
+            # EvtVnd1-4 are the Fronius vendor registers (40116-40121). Only the
+            # vendor registers feed the decoded events_json above, so without
+            # this the standard Evt1/Evt2 bits and any undecoded vendor bit are
+            # lost. Written only when non-zero to keep the series sparse: a fault
+            # leaves a queryable numeric trace even when the bit is not yet in
+            # FroniusEventFlags.json.
+            for ev in ('evt1', 'evt2', 'evt_vnd1', 'evt_vnd2', 'evt_vnd3', 'evt_vnd4'):
+                raw = data.get(ev)
+                if raw:  # non-zero and not None
+                    point = point.field(ev, int(raw))
+
             # MPPT string data (DC per string)
             if 'mppt' in data and data['mppt']:
                 mppt = data['mppt']

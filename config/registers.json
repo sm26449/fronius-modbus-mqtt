@@ -1691,139 +1691,69 @@
       }
     },
     "StVnd": {
-      "0": {
-        "name": "NO_ERROR",
-        "description": "No error",
+      "1": {
+        "name": "I_STATUS_OFF",
+        "description": "Off",
+        "alarm": true
+      },
+      "2": {
+        "name": "I_STATUS_SLEEPING",
+        "description": "Sleeping (auto-shutdown)",
         "alarm": false
       },
-      "102": {
-        "name": "AC_VOLT_HIGH",
-        "description": "AC voltage too high",
+      "3": {
+        "name": "I_STATUS_STARTING",
+        "description": "Starting up",
         "alarm": true
       },
-      "103": {
-        "name": "AC_VOLT_LOW",
-        "description": "AC voltage too low",
+      "4": {
+        "name": "I_STATUS_MPPT",
+        "description": "Tracking power point",
         "alarm": true
       },
-      "104": {
-        "name": "AC_FREQ_HIGH",
-        "description": "AC frequency too high",
+      "5": {
+        "name": "I_STATUS_THROTTLED",
+        "description": "Forced power reduction",
         "alarm": true
       },
-      "105": {
-        "name": "AC_FREQ_LOW",
-        "description": "AC frequency too low",
-        "alarm": true
-      },
-      "106": {
-        "name": "AC_IMPEDANCE",
-        "description": "AC grid impedance too high",
-        "alarm": true
-      },
-      "107": {
-        "name": "OVER_TEMP",
-        "description": "Over temperature",
-        "alarm": true
-      },
-      "108": {
-        "name": "PF_LOW",
-        "description": "Power factor too low",
-        "alarm": true
-      },
-      "301": {
-        "name": "DERATING_TEMP",
-        "description": "Power derating \u2014 over temperature",
+      "6": {
+        "name": "I_STATUS_SHUTTING_DOWN",
+        "description": "Shutting down",
         "alarm": false
       },
-      "302": {
-        "name": "DERATING_VOLT",
-        "description": "Power derating \u2014 voltage",
-        "alarm": false
-      },
-      "303": {
-        "name": "DERATING_FREQ",
-        "description": "Power derating \u2014 frequency",
-        "alarm": false
-      },
-      "304": {
-        "name": "GRID_FAILURE",
-        "description": "Grid connection failure",
+      "7": {
+        "name": "I_STATUS_FAULT",
+        "description": "One or more faults exist",
         "alarm": true
       },
-      "305": {
-        "name": "GROUND_FAULT",
-        "description": "Ground fault detected",
+      "8": {
+        "name": "I_STATUS_STANDBY",
+        "description": "Standby (service on unit)*might be in Events",
         "alarm": true
       },
-      "306": {
-        "name": "POWER_LOW",
-        "description": "Power low",
-        "alarm": false
-      },
-      "307": {
-        "name": "DERATING_CONSUMPTION",
-        "description": "Power derating \u2014 consumption",
-        "alarm": false
-      },
-      "401": {
-        "name": "DC_OVERCURRENT",
-        "description": "DC overcurrent",
+      "9": {
+        "name": "I_STATUS_NO_BUSINIT",
+        "description": "No SolarNet communication",
         "alarm": true
       },
-      "402": {
-        "name": "DC_OVERVOLT",
-        "description": "DC overvoltage",
+      "10": {
+        "name": "I_STATUS_NO_COMM_INV",
+        "description": "No communication with inverter",
         "alarm": true
       },
-      "403": {
-        "name": "DC_OVERTEMP",
-        "description": "DC overtemperature",
+      "11": {
+        "name": "I_STATUS_SN_OVERCURRENT",
+        "description": "Overcurrent on SolarNet plug detected",
         "alarm": true
       },
-      "475": {
-        "name": "ISOLATION_ERROR",
-        "description": "Isolation resistance too low (insulation fault on PV string)",
+      "12": {
+        "name": "I_STATUS_BOOTLOAD",
+        "description": "Inverter is being updated",
         "alarm": true
       },
-      "476": {
-        "name": "RCMU",
-        "description": "Residual current monitoring unit fault",
-        "alarm": true
-      },
-      "501": {
-        "name": "GRID_OVERVOLT_SLOW",
-        "description": "Grid overvoltage (slow)",
-        "alarm": true
-      },
-      "502": {
-        "name": "GRID_UNDERVOLT_SLOW",
-        "description": "Grid undervoltage (slow)",
-        "alarm": true
-      },
-      "509": {
-        "name": "GRID_RECONNECT_DELAY",
-        "description": "Grid reconnection delay active",
-        "alarm": false
-      },
-      "510": {
-        "name": "GRID_FREQ_OUT_RANGE",
-        "description": "Grid frequency out of range",
-        "alarm": true
-      },
-      "601": {
-        "name": "HW_FAULT_INTERNAL",
-        "description": "Internal hardware fault",
-        "alarm": true
-      },
-      "701": {
-        "name": "GROUND_FAULT_HW",
-        "description": "Ground fault hardware error",
-        "alarm": true
-      },
-      "801": {
-        "name": "INTERNAL_ERROR",
-        "description": "Internal software error",
+      "13": {
+        "name": "I_STATUS_AFCI",
+        "description": "AFCI Event",
         "alarm": true
       }
     }
