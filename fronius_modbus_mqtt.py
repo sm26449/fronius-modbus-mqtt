@@ -201,7 +201,7 @@ class FroniusModbusMQTT:
                 limit_pct=limit_pct,
                 revert_timeout=revert_timeout,
                 ramp_time=ramp_time,
-                source="mqtt",
+                source=payload.get("source", "mqtt"),
             )
             if not self.modbus_client.device_poller.queue_power_limit_command(cmd):
                 if self.mqtt_publisher:
@@ -213,7 +213,7 @@ class FroniusModbusMQTT:
             cmd = PowerLimitCommand(
                 device_id=dev_id,
                 limit_pct=100.0,
-                source="mqtt",
+                source=payload.get("source", "mqtt"),
             )
             if not self.modbus_client.device_poller.queue_power_limit_command(cmd):
                 if self.mqtt_publisher:

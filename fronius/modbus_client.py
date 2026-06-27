@@ -38,6 +38,15 @@ class DeviceRuntimeState:
     backoff_until: Optional[float] = None  # timestamp when to retry
 
 
+# Single-writer guard (OV-redesign A3): the pv-stack-ov-protection node is the
+# SOLE external writer of the inverter power limit — every operator/manual intent
+# is routed to it as a manual_floor. Any other origin is rejected so two writers
+# can never fight over one Modbus register. `auto_revert` and `shutdown` are
+# internal commands the driver creates directly (not via MQTT), so they are
+# allowed. (Foreign origins — 'mqtt', 'monitoring_ui', dynamic-grid — are dropped.)
+OV_ALLOWED_SOURCES = frozenset({"nodered-ov", "auto_revert", "shutdown"})
+
+
 @dataclass
 class PowerLimitCommand:
     """Command to set inverter power limit via Modbus write."""
@@ -1153,6 +1162,17 @@ class DevicePoller(threading.Thread):
             self.log.warning(f"Inverter {cmd.device_id}: write rejected — unknown device")
             return False
 
+        # Single-writer guard (OV-redesign A3): only the OV node (+ internal
+        # auto_revert/shutdown) may write. A foreign origin means a second writer
+        # is fighting over the register — reject + alert instead of letting it.
+        if cmd.source not in OV_ALLOWED_SOURCES:
+            self.log.error(
+                f"Inverter {cmd.device_id}: write REJECTED — source '{cmd.source}' "
+                f"is not the single writer. Only 'nodered-ov' may write the power "
+                f"limit; route manual intent via the OV manual_floor topic."
+            )
+            return False
+
         # Validate range
         min_pct = self.write_config.min_power_limit_pct
         max_pct = self.write_config.max_power_limit_pct
@@ -1358,28 +1378,44 @@ class DevicePoller(threading.Thread):
         self._last_write_time[device_id] = time.time()
         self._write_count += 1
 
-        if result.get('status') in ('success', 'unverified'):
+        # cmd/result tracking (OV-redesign G-5/G-6/C8):
+        #   success  → register matches; track the limit (revertable).
+        #   mismatch → register IS limited but to a wrong value; STILL track it
+        #              (never leave an applied throttle untracked/unrevertable —
+        #              the OV closed loop re-writes to correct it).
+        #   unverified → PENDING: we don't know if the write took. Do NOT record
+        #              an active limit or arm a revert (no phantom state); the OV
+        #              closed loop re-verifies on its next cmd/result.
+        status = result.get('status')
+        if status in ('success', 'mismatch'):
             with self._write_state_lock:
-                self._active_limits[device_id] = {
-                    'limit_pct': cmd.limit_pct,
-                    'set_at': time.time(),
-                    'source': cmd.source,
-                }
-                # Set auto-revert timer (only for non-100% limits)
-                if (self.write_config.auto_revert_seconds > 0
-                        and cmd.limit_pct < 100.0
-                        and cmd.source != "auto_revert"):
-                    self._auto_revert_timers[device_id] = (
-                        time.time() + self.write_config.auto_revert_seconds
-                    )
-                    self.log.info(
-                        f"Inverter {device_id}: auto-revert to 100% in "
-                        f"{self.write_config.auto_revert_seconds}s"
-                    )
-                else:
-                    # Clear auto-revert timer for 100% or auto_revert commands
+                if cmd.limit_pct >= 100.0:
+                    # Restore — no longer limited.
                     self._auto_revert_timers.pop(device_id, None)
                     self._active_limits.pop(device_id, None)
+                else:
+                    self._active_limits[device_id] = {
+                        'limit_pct': cmd.limit_pct,
+                        'set_at': time.time(),
+                        'source': cmd.source,
+                    }
+                    # Arm the driver auto-revert ONLY for a foreign throttle. An
+                    # OV-sourced write (nodered-ov) is EXEMPT — the OV node is the
+                    # SOLE revert clock (revert_timeout=0 + heartbeat); a second
+                    # driver clock would silently un-throttle a 60-min ceiling at
+                    # the auto_revert_seconds mark (G-7).
+                    if (self.write_config.auto_revert_seconds > 0
+                            and cmd.source not in ("auto_revert", "nodered-ov")):
+                        self._auto_revert_timers[device_id] = (
+                            time.time() + self.write_config.auto_revert_seconds
+                        )
+                        self.log.info(
+                            f"Inverter {device_id}: auto-revert to 100% in "
+                            f"{self.write_config.auto_revert_seconds}s"
+                        )
+                    else:
+                        self._auto_revert_timers.pop(device_id, None)
+        # 'unverified' → leave _active_limits / timers untouched (PENDING).
 
         # Step 11: Force controls re-read on next poll cycle
         self._last_controls_read.pop(device_id, None)
