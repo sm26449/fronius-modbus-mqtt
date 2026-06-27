@@ -24,7 +24,6 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel, Field
 
 from fronius import __version__
-from fronius.modbus_client import PowerLimitCommand
 
 
 class PowerLimitRequest(BaseModel):
@@ -103,11 +102,22 @@ class MonitoringServer:
         revert_timeout: int,
         ramp_time: int,
     ) -> JSONResponse:
-        """Validate and enqueue a power limit command from the monitoring UI.
+        """Route a monitoring-UI power limit through the OV node's manual_floor.
 
-        Returns a JSON payload with status and reason. Never raises — always
-        returns a structured response so the UI can render an actionable
-        message.
+        Single-writer (OV-redesign A2): the OV node is the ONLY writer of the
+        Modbus power-limit register. The old direct path
+        (``queue_power_limit_command(source="monitoring_ui")``) is refused by
+        the driver write guard — only ``nodered-ov`` may write. So a limit set
+        here becomes a manual *ceiling*: we publish a retained
+        ``pv-stack/nodered/ov/<id>/manual_floor`` and the OV node folds
+        ``effective = min(OV voltage-step, floor)``. At normal voltage the
+        effective limit equals the value set here; OV still tightens below it
+        for over-voltage safety, and a single register is never fought over.
+
+        Never raises — always returns a structured response so the UI can
+        render an actionable message. Keeps ``status: "queued"`` +
+        ``device_id`` + ``limit_pct`` so the existing dashboard JS renders it
+        as success unchanged.
         """
         app = self._app
         write_cfg = app.config.write
@@ -117,53 +127,70 @@ class MonitoringServer:
                 status_code=403,
             )
 
-        if not app.modbus_client or not app.modbus_client.device_poller:
+        if not app.mqtt_publisher:
             return JSONResponse(
-                {"status": "rejected", "reason": "poller not ready"},
+                {"status": "rejected", "reason": "mqtt publisher not ready"},
                 status_code=503,
             )
 
         # Validate the device is an inverter known to this container.
-        inv_ids = {inv.get("device_id") for inv in app.modbus_client.inverters}
+        inv_ids = {inv.get("device_id") for inv in app.modbus_client.inverters} \
+            if app.modbus_client else set()
         if device_id not in inv_ids:
             return JSONResponse(
                 {"status": "rejected", "reason": f"unknown inverter id {device_id}"},
                 status_code=404,
             )
 
-        cmd = PowerLimitCommand(
-            device_id=device_id,
-            limit_pct=float(limit_pct),
-            revert_timeout=int(revert_timeout),
-            ramp_time=int(ramp_time),
-            source="monitoring_ui",
-        )
+        topic = f"pv-stack/nodered/ov/{device_id}/manual_floor"
+
+        if limit_pct >= 100:
+            # Restore = clear the manual ceiling; OV returns to voltage-only
+            # control and restores the inverter itself.
+            payload = {"manual_floor_pct": None, "expires_at_ms": 0}
+            floor_repr, expires_at_ms = None, 0
+        else:
+            # The OV node's _validFloor accepts only [10,100]; mirror that here
+            # so the UI shows an actionable error instead of a silent OV drop.
+            if limit_pct < 10:
+                return JSONResponse(
+                    {"status": "rejected",
+                     "reason": "limit_pct must be 10-100 (manual ceiling)"},
+                    status_code=400,
+                )
+            # Ceiling TTL: honour an explicit revert_timeout, else self-expire
+            # after 1h so a forgotten ceiling never sticks (the 8082 page has
+            # no auto-revert safety net of its own). OV also voltage-gates the
+            # relax (E14) so it never expires INTO a high-voltage moment.
+            duration_s = int(revert_timeout) if revert_timeout and revert_timeout > 0 else 3600
+            expires_at_ms = int((time.time() + duration_s) * 1000)
+            floor_repr = int(round(limit_pct))
+            payload = {"manual_floor_pct": floor_repr, "expires_at_ms": expires_at_ms}
 
         try:
-            queued = app.modbus_client.device_poller.queue_power_limit_command(cmd)
+            ok = app.mqtt_publisher.publish(topic, payload, retain=True)
         except Exception as e:
-            logger.exception(f"Monitoring UI: error queuing command for inverter {device_id}")
-            return JSONResponse(
-                {"status": "error", "reason": str(e)},
-                status_code=500,
-            )
+            logger.exception(f"Monitoring UI: error publishing manual_floor for inverter {device_id}")
+            return JSONResponse({"status": "error", "reason": str(e)}, status_code=500)
 
-        if not queued:
+        if not ok:
             return JSONResponse(
-                {"status": "rejected", "reason": "validation failed or queue full"},
-                status_code=400,
+                {"status": "rejected", "reason": "mqtt publish failed (broker down?)"},
+                status_code=502,
             )
 
         logger.info(
-            f"Monitoring UI: queued power limit for inverter {device_id} "
-            f"({limit_pct}%, revert={revert_timeout}s, ramp={ramp_time}s)"
+            f"Monitoring UI: {'cleared' if floor_repr is None else 'set'} OV manual_floor "
+            f"for inverter {device_id} (floor={floor_repr}, expires_at_ms={expires_at_ms}) "
+            f"— routed via single-writer OV"
         )
         return JSONResponse({
             "status": "queued",
             "device_id": device_id,
             "limit_pct": float(limit_pct),
-            "revert_timeout": int(revert_timeout),
-            "ramp_time": int(ramp_time),
+            "manual_floor_pct": floor_repr,
+            "expires_at_ms": expires_at_ms,
+            "routed_via": "ov_manual_floor",
         })
 
     def _collect_data(self) -> dict:
