@@ -541,6 +541,14 @@ class MQTTPublisher:
         Topic format: {prefix}/inverter/{id}/cmd/{command}
         """
         try:
+            # Commands are EVENTS, never state. A retained command would be
+            # re-delivered by the broker on every reconnect and re-execute an
+            # OV power-limit unsolicited — reject it outright (review L2).
+            if msg.retain:
+                self.log.warning(f"MQTT ignoring RETAINED command on {msg.topic} "
+                                 "(commands must be published without retain)")
+                return
+
             topic_parts = msg.topic.split('/')
             # Expected: [prefix, 'inverter', device_id, cmd_suffix, command]
             if len(topic_parts) < 5 or topic_parts[1] != 'inverter' or topic_parts[3] != self._cmd_suffix:
