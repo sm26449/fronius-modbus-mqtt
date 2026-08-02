@@ -753,6 +753,39 @@ class MQTTPublisher:
         except Exception as e:
             self.log.error(f"Error publishing inverter {device_id} data: {e}")
 
+    # Instantaneous "flow" fields zeroed when an inverter goes offline, so the
+    # retained MQTT topics stop serving a frozen phantom value (e.g. an offline
+    # inverter still appearing to export 14 kW). Voltages/frequency/temperatures
+    # are NOT zeroed (potentials — plausible at zero flow; 0 V would imply a grid
+    # outage). CUMULATIVE energy (WH, per-string DCWH) is NEVER zeroed — that
+    # would corrupt energy/daily-delta calculations downstream.
+    INVERTER_OFFLINE_ZERO_FIELDS = (
+        'W', 'VA', 'VAr', 'A', 'AphA', 'AphB', 'AphC', 'DCA', 'DCW', 'PF',
+    )
+
+    def publish_inverter_offline(self, device_id: str):
+        """Zero an offline inverter's instantaneous fields (retained, deduped).
+
+        Idempotent: uses publish_if_changed, so calling it every runtime tick
+        while the inverter stays offline emits at most one message per field.
+        On recovery the next publish_inverter_data overwrites the zeros.
+
+        NOTE (review 2026-08-02): ported into the repo to end the repo<->template
+        drift (M24). NOT yet wired to a caller — wiring is HIGH-6, deferred to a
+        low-production window because zeroing fronius/inverter/N/W directly
+        changes the PV the grid-controller sums, and a wedged-but-producing
+        inverter must not be zeroed to 0 (would under-read). Keep uncalled until
+        the NR-side W-aggregation staleness handling is confirmed.
+        """
+        if not self.client:
+            return
+        try:
+            for sunspec_name in self.INVERTER_OFFLINE_ZERO_FIELDS:
+                topic = self._build_topic('inverter', device_id, sunspec_name)
+                self.publish_if_changed(topic, 0)
+        except Exception as e:
+            self.log.error(f"Error publishing inverter {device_id} offline zeros: {e}")
+
     def _publish_inverter_data_inner(self, device_id: str, data: Dict):
         """Inner implementation of publish_inverter_data."""
         device_type = 'inverter'

@@ -43,19 +43,32 @@ def _env_get(key: str, default: Any = None, type_cast: type = str) -> Any:
         try:
             return int(value)
         except ValueError:
+            _warn_bad_env(key, value, default)
             return default
     elif type_cast == float:
         try:
             return float(value)
         except ValueError:
+            _warn_bad_env(key, value, default)
             return default
     elif type_cast == list:
         # Parse comma-separated list of integers
         try:
             return [int(x.strip()) for x in value.split(',') if x.strip()]
         except ValueError:
+            _warn_bad_env(key, value, default)
             return default
     return value
+
+
+def _warn_bad_env(key: str, value: str, default) -> None:
+    """A malformed env value silently falling back to a default is dangerous
+    (e.g. a corrupt INVERTER_IDS yielding the wrong fleet). Make it loud —
+    stderr, since logging may not be configured yet at config-load time
+    (review M23)."""
+    import sys
+    print(f"[config] WARNING: env {key}={value!r} is invalid — "
+          f"falling back to default {default!r}", file=sys.stderr)
 
 
 class ConfigValidationError(ValueError):

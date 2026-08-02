@@ -63,10 +63,21 @@ def check_health():
             print(f"Health file is stale ({int(age)}s old, max {max_age}s)")
             return 1
 
-        # Accept 'healthy' or 'sleep' as valid states
-        if status not in ('healthy', 'sleep'):
+        # Accept 'healthy', 'degraded' or 'sleep' as valid states.
+        # 'degraded' = reading only part of the inverter fleet (self-heal is
+        # working on it). It is deliberately NOT unhealthy: restart:unless-
+        # stopped ignores health so failing here wouldn't restart anything, and
+        # the alert + in-process escalation own recovery. But it IS surfaced in
+        # `docker ps` and logs so the socket-open lie (2026-08-02) is gone.
+        if status not in ('healthy', 'degraded', 'sleep'):
             print(f"Service status: {status}")
             return 1
+
+        if status == 'degraded':
+            print(f"DEGRADED: reading {fields.get('inverters_online','?')}/"
+                  f"{fields.get('inverters_configured','?')} inverters "
+                  f"(self-heal active, last check {int(age)}s ago)")
+            return 0
 
         # In sleep mode, don't check Modbus (it's expected to be down)
         if status == 'sleep':

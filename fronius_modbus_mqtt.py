@@ -81,15 +81,30 @@ class FroniusModbusMQTT:
         # 30s stat cycles where the collector reads only part of the inverter
         # fleet, and force a full Modbus reconnect once it persists.
         self._partial_cycles = 0
+
+        def _env_int(name: str, default: int, minimum: int) -> int:
+            """Parse a positive-int env; fall back (loudly) on garbage so a
+            typo can't crash boot or disable the watchdog (review M21)."""
+            raw = os.environ.get(name)
+            if raw is None:
+                return default
+            try:
+                v = int(raw)
+                if v < minimum:
+                    raise ValueError(f"< {minimum}")
+                return v
+            except ValueError as e:
+                self.log.warning(
+                    f"env {name}={raw!r} invalid ({e}) — using {default}")
+                return default
+
         # 10 cycles × 30s = 5 min of sustained partial before self-heal reconnect.
-        self._partial_cycles_for_reconnect = int(
-            os.environ.get('PARTIAL_RECONNECT_CYCLES', '10'))
+        self._partial_cycles_for_reconnect = _env_int('PARTIAL_RECONNECT_CYCLES', 10, 1)
         # If still partial 20 min after the reconnect+reconcile didn't heal it,
         # exit(1) so Docker does a full restart — the proven last-resort remedy.
         # Only escalates while at least one inverter is up (DataManager reachable
         # but wedged); a fully-dark fleet is left to the alert (may be legit).
-        self._partial_cycles_for_exit = int(
-            os.environ.get('PARTIAL_EXIT_CYCLES', '40'))
+        self._partial_cycles_for_exit = _env_int('PARTIAL_EXIT_CYCLES', 40, 2)
 
         # Setup signal handlers
         signal.signal(signal.SIGINT, self._signal_handler)
@@ -499,13 +514,6 @@ class FroniusModbusMQTT:
             else:
                 self.log.debug(f"Unexpected runtime key format: {key}")
 
-        # Partial-fleet self-heal watchdog: some-but-not-all inverters online
-        # means the DataManager buffer wedged (incident 2026-08-02). Force a
-        # full reconnect after it persists, instead of waiting for a human to
-        # restart the container. Only acts when >1 inverter is configured
-        # (a genuine partial is impossible with a single device).
-        self._partial_fleet_watchdog(stats)
-
     def _partial_fleet_watchdog(self, stats: dict):
         """Self-heal sustained partial inverter reads.
 
@@ -565,6 +573,15 @@ class FroniusModbusMQTT:
                 now = time.time()
                 if now - last_health_write >= health_interval:
                     self._write_health_file()
+                    # Partial-fleet watchdog runs FIRST and UNCONDITIONALLY —
+                    # it must self-heal even when MQTT is down (previously it
+                    # lived inside _publish_runtime_stats after an early return
+                    # on !mqtt.connected, so the fix was dead exactly when a
+                    # broker outage coincided with a fleet wedge — review
+                    # M11/M19/M22). It only needs poller stats, not MQTT.
+                    if self.modbus_client and self.modbus_client.device_poller:
+                        self._partial_fleet_watchdog(
+                            self.modbus_client.device_poller.get_runtime_stats())
                     self._publish_runtime_stats()
                     last_health_write = now
 
@@ -604,14 +621,31 @@ class FroniusModbusMQTT:
             modbus_connected = poller_status.get('connected', False)
             is_night = poller_status.get('is_night_time', False)
 
+            # Fleet completeness — the socket being "connected" said nothing
+            # about whether we're actually reading the whole fleet (the 2026-08-02
+            # incident: modbus:True while reading 1/4, healthcheck said healthy).
+            configured_inv = len(self.config.devices.inverters)
+            online_inv = 0
+            if self.modbus_client and self.modbus_client.device_poller:
+                rs = self.modbus_client.device_poller.get_runtime_stats()
+                online_inv = rs.get('inverter_online', 0)
+            # Partial fleet during daytime is a real degradation (self-heal is
+            # working on it) — surface it as 'degraded' rather than a bald
+            # 'healthy'. NOT 'unhealthy': restart:unless-stopped ignores health,
+            # and the collector self-heals; the alert + escalation own recovery.
+            fleet_partial = (not in_sleep_mode and configured_inv > 1
+                             and online_inv < configured_inv)
+
             # Status can be: healthy, sleep, unhealthy
             # Sleep mode is considered healthy (DataManager is just unavailable at night)
             if in_sleep_mode:
                 status = 'sleep'
-            elif modbus_connected:
-                status = 'healthy'
-            else:
+            elif not modbus_connected:
                 status = 'unhealthy'
+            elif fleet_partial:
+                status = 'degraded'
+            else:
+                status = 'healthy'
 
             # Disconnection counts
             mqtt_disconnections = self.mqtt_publisher.disconnection_count if self.mqtt_publisher else 0
@@ -626,6 +660,8 @@ class FroniusModbusMQTT:
                 f.write(f"influxdb:{influxdb_connected}\n")
                 f.write(f"influxdb_enabled:{influxdb_enabled}\n")
                 f.write(f"modbus:{modbus_connected}\n")
+                f.write(f"inverters_online:{online_inv}\n")
+                f.write(f"inverters_configured:{configured_inv}\n")
                 f.write(f"sleep_mode:{in_sleep_mode}\n")
                 f.write(f"night_time:{is_night}\n")
                 f.write(f"uptime:{self._format_uptime()}\n")

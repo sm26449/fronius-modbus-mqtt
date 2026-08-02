@@ -5,6 +5,35 @@ All notable changes to Fronius Modbus MQTT will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.12.0] - 2026-08-02
+
+### Fixed — reliability & observability (review 2026-08-02, safe MEDIUMs)
+
+- **InfluxDB no longer discards the batch buffer on a transient ping blip**
+  (M14/M20): a single health-ping miss used to flip connected=False, which
+  stopped new writes AND recreated the client (dropping batched points the
+  write_api's own 300s retry would have saved). Now requires 3 consecutive
+  ping failures before tear-down; keeps buffering through short blips.
+- **No more "cannot schedule new futures after shutdown"** (M18): is_enabled()
+  returns False as soon as close() begins (_closing gate), so a poller thread
+  racing shutdown can't write onto the closing executor.
+- **Partial-fleet watchdog runs even when MQTT is down** (M11/M19/M22): moved
+  out of _publish_runtime_stats (which early-returns on !mqtt.connected) into
+  the main loop; self-heal no longer dies exactly when a broker outage
+  coincides with a fleet wedge.
+- **Healthcheck stops lying** (M17): the health file now carries
+  inverters_online/configured and reports 'degraded' (exit 0) when reading a
+  partial fleet instead of a bald 'healthy' off socket-open alone (the
+  2026-08-02 lie). 'degraded' is intentionally not unhealthy — restart:unless-
+  stopped ignores health and the collector self-heals.
+- **Config hardening** (M21/M23): PARTIAL_RECONNECT/EXIT_CYCLES parse safely
+  (bad value -> warn + default, never crash boot); malformed numeric/list env
+  (e.g. a corrupt INVERTER_IDS) now logs a loud stderr warning instead of
+  silently falling back.
+- **publish_inverter_offline ported into the repo** (M24), uncalled — ends the
+  repo<->template drift that would delete it on the next sync. Wiring it is
+  HIGH-6, deferred to a low-production window.
+
 ## [1.11.0] - 2026-08-02
 
 ### Fixed — discovery-only-at-boot + watchdog blind spots (review 2026-08-02)

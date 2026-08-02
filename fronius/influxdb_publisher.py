@@ -15,6 +15,11 @@ RETRY_INITIAL_DELAY = 2  # seconds
 RETRY_MAX_DELAY = 60  # seconds
 RETRY_BACKOFF_FACTOR = 2
 RECONNECT_CHECK_INTERVAL = 30  # seconds
+# A single failed health-ping does NOT mean writes are failing — the batching
+# write_api has its own 300s retry. Only tear down + recreate the client (which
+# DISCARDS the batch buffer) after this many consecutive ping failures, so a
+# transient blip keeps buffering instead of dropping points (review M14/M20).
+PING_FAILURES_BEFORE_RECONNECT = 3
 
 
 class InfluxDBPublisher:
@@ -55,6 +60,8 @@ class InfluxDBPublisher:
         # Reconnection thread control
         self._stop_reconnect = threading.Event()
         self._reconnect_thread = None
+        self._closing = threading.Event()   # set in close(): stop accepting writes
+        self._ping_failures = 0             # consecutive health-ping failures
 
         if config.enabled:
             self._setup_client_with_retry()
@@ -187,25 +194,36 @@ class InfluxDBPublisher:
         """
         while not self._stop_reconnect.is_set():
             if self.connected:
-                # Proactive health check — detect disconnection early
+                # Proactive health check — detect disconnection early. But a
+                # single ping miss is NOT a write failure: keep buffering (the
+                # write_api retries for 300s) and only mark disconnected +
+                # recreate after PING_FAILURES_BEFORE_RECONNECT consecutive
+                # misses, so a transient blip doesn't discard the batch buffer
+                # AND stop new writes (double loss — review M14/M20).
+                ping_ok = False
                 try:
                     with self.lock:
                         client = self.client
-                    if not client:
-                        self.connected = False
-                        self._stop_reconnect.wait(RECONNECT_CHECK_INTERVAL)
-                        continue
-                    if not client.ping():
-                        self.log.warning("InfluxDB ping failed")
-                        self.connected = False
+                    ping_ok = bool(client and client.ping())
                 except Exception as e:
                     self.log.warning(f"InfluxDB health check failed: {e}")
-                    self.connected = False
+                if ping_ok:
+                    self._ping_failures = 0
+                else:
+                    self._ping_failures += 1
+                    self.log.warning(
+                        f"InfluxDB ping failed "
+                        f"({self._ping_failures}/{PING_FAILURES_BEFORE_RECONNECT}) "
+                        "— still buffering"
+                    )
+                    if self._ping_failures >= PING_FAILURES_BEFORE_RECONNECT:
+                        self.connected = False
             else:
                 self.log.debug("Attempting InfluxDB reconnection...")
                 self._setup_client()
 
                 if self.connected:
+                    self._ping_failures = 0
                     self.log.info("InfluxDB reconnected successfully")
 
             # Wait before next check
@@ -239,8 +257,14 @@ class InfluxDBPublisher:
             self.connected = False
 
     def is_enabled(self) -> bool:
-        """Check if InfluxDB publishing is enabled and connected"""
-        return self.config.enabled and self.connected
+        """Check if InfluxDB publishing is enabled and connected.
+
+        Also False once close() has begun, so a poller thread racing shutdown
+        cannot call write_api.write() on a closed executor ("cannot schedule
+        new futures after shutdown", observed 2026-08-01 — review M18).
+        """
+        return (self.config.enabled and self.connected
+                and not self._closing.is_set())
 
     def _should_write(self, key: str, data: Dict) -> bool:
         """
@@ -615,6 +639,10 @@ class InfluxDBPublisher:
 
     def close(self):
         """Close InfluxDB connection"""
+        # Stop accepting writes FIRST (is_enabled() now returns False) so a
+        # poller thread racing shutdown can't schedule onto the closing
+        # write_api executor (review M18).
+        self._closing.set()
         # Stop reconnection thread
         self._stop_reconnect.set()
         if self._reconnect_thread is not None and self._reconnect_thread.is_alive():
