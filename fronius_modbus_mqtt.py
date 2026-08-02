@@ -81,9 +81,15 @@ class FroniusModbusMQTT:
         # 30s stat cycles where the collector reads only part of the inverter
         # fleet, and force a full Modbus reconnect once it persists.
         self._partial_cycles = 0
-        # 10 cycles × 30s = 5 min of sustained partial before self-heal.
+        # 10 cycles × 30s = 5 min of sustained partial before self-heal reconnect.
         self._partial_cycles_for_reconnect = int(
             os.environ.get('PARTIAL_RECONNECT_CYCLES', '10'))
+        # If still partial 20 min after the reconnect+reconcile didn't heal it,
+        # exit(1) so Docker does a full restart — the proven last-resort remedy.
+        # Only escalates while at least one inverter is up (DataManager reachable
+        # but wedged); a fully-dark fleet is left to the alert (may be legit).
+        self._partial_cycles_for_exit = int(
+            os.environ.get('PARTIAL_EXIT_CYCLES', '40'))
 
         # Setup signal handlers
         signal.signal(signal.SIGINT, self._signal_handler)
@@ -501,27 +507,47 @@ class FroniusModbusMQTT:
         self._partial_fleet_watchdog(stats)
 
     def _partial_fleet_watchdog(self, stats: dict):
-        """Force a full Modbus reconnect on sustained partial inverter reads."""
+        """Self-heal sustained partial inverter reads.
+
+        Compares online against the CONFIGURED fleet size (not the discovered
+        one): under-discovery at boot yields inverter_total=1 which would look
+        "fully online" against itself — the exact blind spot that let the
+        2026-08-02 incident run for hours. Escalates reconnect -> full restart.
+        """
         poller = self.modbus_client.device_poller if self.modbus_client else None
         if not poller:
             return
-        total = stats.get('inverter_total', 0)
+        configured = len(self.config.devices.inverters)
         online = stats.get('inverter_online', 0)
-        is_partial = total > 1 and 0 < online < total
-        if is_partial:
-            self._partial_cycles += 1
-            self.log.warning(
-                f"Partial inverter fleet: {online}/{total} online "
-                f"(cycle {self._partial_cycles}/{self._partial_cycles_for_reconnect})"
-            )
-            if self._partial_cycles >= self._partial_cycles_for_reconnect:
-                poller.request_reconnect(
-                    f"{online}/{total} inverters online for "
-                    f"{self._partial_cycles} cycles"
-                )
-                self._partial_cycles = 0
-        else:
+        discovered = stats.get('inverter_total', 0)
+        # Partial = fewer inverters reporting than are CONFIGURED (covers both
+        # offline devices and boot under-discovery, where discovered<configured).
+        is_partial = configured > 1 and online < configured
+        if not is_partial:
             self._partial_cycles = 0
+            return
+
+        self._partial_cycles += 1
+        self.log.warning(
+            f"Partial inverter fleet: {online} online / {discovered} discovered "
+            f"/ {configured} configured (cycle {self._partial_cycles})"
+        )
+        # Step 1 — force reconnect + reconcile (re-identify missing inverters).
+        if self._partial_cycles == self._partial_cycles_for_reconnect:
+            poller.request_reconnect(
+                f"{online}/{configured} inverters after "
+                f"{self._partial_cycles} cycles"
+            )
+        # Step 2 — last resort: full process restart via Docker, but only while
+        # the DataManager is reachable (>=1 inverter up = wedge, restart-curable).
+        # A fully-dark fleet (online==0) is left alone (night/DataManager reboot).
+        elif (self._partial_cycles >= self._partial_cycles_for_exit and online > 0):
+            self.log.error(
+                f"Partial fleet unrecovered after {self._partial_cycles} cycles "
+                f"({online}/{configured}) — exit(1) for full Docker restart"
+            )
+            self._shutdown()
+            os._exit(1)
 
     def _main_loop(self):
         """Main loop - just keeps the app running while threads poll"""
@@ -544,6 +570,12 @@ class FroniusModbusMQTT:
 
             except KeyboardInterrupt:
                 break
+            except Exception:
+                # Health/stats/watchdog are best-effort — a transient exception
+                # (e.g. MQTT hiccup mid-publish) must NOT kill the process and
+                # leave polling + active OV power-limits orphaned without a
+                # clean _shutdown. Log the traceback and keep the loop alive.
+                self.log.exception("Main-loop stats cycle failed — continuing")
 
         self._shutdown()
 

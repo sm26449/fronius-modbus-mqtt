@@ -360,7 +360,8 @@ class DevicePoller(threading.Thread):
                  parser: RegisterParser, publish_callback: Callable,
                  debug_config: DebugConfig = None,
                  write_config: WriteConfig = None,
-                 command_result_callback: Callable = None):
+                 command_result_callback: Callable = None,
+                 configured_inverter_ids: List[int] = None):
         super().__init__(daemon=True, name="DevicePoller")
         self.modbus_config = modbus_config
         self.inverters = inverters
@@ -388,6 +389,20 @@ class DevicePoller(threading.Thread):
         # resets offline devices so the next cycle re-reads the whole fleet
         # on a fresh DataManager session (what a process restart did manually).
         self._force_reconnect = threading.Event()
+
+        # Configured inverter IDs (the fleet that SHOULD exist), vs the
+        # discovered `self.inverters` (what responded at boot). Root of the
+        # 2026-08-02 incident: discovery runs once at boot and a device absent
+        # then is never read again. We now periodically re-identify the
+        # configured-but-missing IDs and add them back (daytime only).
+        self.configured_inverter_ids = (
+            configured_inverter_ids
+            if configured_inverter_ids is not None
+            else [inv['device_id'] for inv in inverters]
+        )
+        self._reconcile_interval = 300      # re-check missing inverters every 5 min
+        self._last_reconcile = time.time()
+        self._reconnect_dwell_s = 15        # dead time after a forced disconnect
 
         # Track last controls read time per inverter
         self._last_controls_read: Dict[int, float] = {}
@@ -570,6 +585,37 @@ class DevicePoller(threading.Thread):
                 state.model_id_verified_at = datetime.now()
 
             self.log.debug(f"{device_type.title()} {unit_id}: model_id verified = {new_model_id}")
+
+    def _reconcile_missing_inverters(self) -> None:
+        """Re-identify configured inverters that aren't in the polled fleet and
+        add them back. Fixes discovery-only-at-boot (incident 2026-08-02): a
+        device absent at boot was never read again. Runs on the poller thread
+        (append to self.inverters is safe — the poll loop reads it on the same
+        thread). Skipped at night (inverters asleep => identify would fail)."""
+        discovered = {inv['device_id'] for inv in self.inverters}
+        missing = [i for i in self.configured_inverter_ids if i not in discovered]
+        if not missing:
+            return
+        if self._is_night_time():
+            return
+        self.log.warning(
+            f"Fleet reconcile: {len(missing)} configured inverter(s) missing "
+            f"{missing} — re-identifying"
+        )
+        for unit_id in missing:
+            try:
+                info = self.connection.identify_device(unit_id)
+            except Exception as e:  # noqa: BLE001
+                self.log.debug(f"reconcile identify {unit_id} failed: {e}")
+                info = None
+            if info and info.get('device_type') == 'inverter':
+                info['has_storage'] = self.connection.check_storage_support(unit_id)
+                self.inverters.append(info)
+                self.log.warning(
+                    f"Fleet reconcile: RECOVERED inverter {unit_id} "
+                    f"({info.get('model','?')}) — back in poll rotation"
+                )
+            time.sleep(0.5)
 
     def request_reconnect(self, reason: str = "") -> None:
         """Ask the poller thread to drop the TCP connection and re-read the
@@ -1613,13 +1659,29 @@ class DevicePoller(threading.Thread):
 
         while self.running:
             # Partial-fleet self-heal: honour a reconnect request by dropping
-            # the TCP so the next connect() opens a fresh DataManager session
-            # (clears the Modbus buffer wedge). Offline backoffs were already
-            # cleared in request_reconnect() so every device is re-read.
+            # the TCP, waiting a dwell (so the DataManager fully closes the old
+            # session — a same-instant reconnect can inherit the wedged buffer),
+            # then re-identifying missing inverters. This reproduces what a
+            # process restart does, which was the only empirically-proven remedy.
             if self._force_reconnect.is_set():
                 self._force_reconnect.clear()
-                self.log.warning("DevicePoller: forcing Modbus reconnect (partial-fleet watchdog)")
+                self.log.warning(
+                    f"DevicePoller: forced Modbus reconnect (dwell "
+                    f"{self._reconnect_dwell_s}s) — partial-fleet watchdog"
+                )
                 self.connection.disconnect()
+                self._stop_event.wait(self._reconnect_dwell_s)
+                if not self.running:
+                    break
+                self.connection.connect()
+                self._reconcile_missing_inverters()
+                self._last_reconcile = time.time()
+
+            # Periodic fleet reconcile: re-identify configured inverters that
+            # dropped out of the polled set (discovery-only-at-boot fix).
+            if time.time() - self._last_reconcile >= self._reconcile_interval:
+                self._last_reconcile = time.time()
+                self._reconcile_missing_inverters()
 
             # Check if host is available (ping check)
             if self.modbus_config.ping_check_enabled:
@@ -1842,6 +1904,7 @@ class FroniusModbusClient:
                 debug_config=self.debug_config,
                 write_config=self.write_config,
                 command_result_callback=self.command_result_callback,
+                configured_inverter_ids=list(self.devices_config.inverters),
             )
             self.device_poller.start()
             self.log.info("Started single DevicePoller thread for all devices")

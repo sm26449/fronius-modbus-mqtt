@@ -5,6 +5,31 @@ All notable changes to Fronius Modbus MQTT will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.11.0] - 2026-08-02
+
+### Fixed — discovery-only-at-boot + watchdog blind spots (review 2026-08-02)
+
+Follow-up to 1.10.0 after a multi-agent review showed 1.10.0 was largely a
+no-op against the real 2026-08-02 incident (a boot-time DISCOVERY failure, not
+a runtime wedge) and the watchdog was structurally blind to it.
+
+- **Periodic fleet reconcile** (root fix): `DevicePoller._reconcile_missing_
+  inverters()` re-identifies configured-but-missing inverter IDs every 5 min
+  (daytime) and adds them back to the poll rotation. Before, a device absent at
+  boot was never read again. Configured IDs threaded through via
+  `configured_inverter_ids`.
+- **Watchdog compares to CONFIGURED fleet**, not discovered: under-discovery
+  yielded inverter_total=1 = "fully online" against itself (the blind spot).
+- **Forced reconnect now has a dwell + re-identify** (reproduces a restart, the
+  only proven remedy) and **escalation**: sustained partial (>1 inverter up)
+  for ~20 min after reconnect+reconcile => `_shutdown()` + `os._exit(1)` for a
+  full Docker restart. Gated to daytime + DataManager reachable (online>0) so a
+  legit fully-dark fleet never crash-loops. Env `PARTIAL_EXIT_CYCLES`.
+- **Main loop survives exceptions**: the 30s stats/watchdog cycle now catches
+  broad `Exception` (log + continue) instead of only `KeyboardInterrupt`, so a
+  transient failure no longer kills the process leaving polling + active OV
+  power-limits orphaned without a clean shutdown.
+
 ## [1.10.0] - 2026-08-02
 
 ### Fixed — partial-fleet self-heal (DataManager Modbus wedge)
