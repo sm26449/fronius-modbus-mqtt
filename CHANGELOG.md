@@ -5,13 +5,13 @@ All notable changes to Fronius Modbus MQTT will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.13.0] - 2026-08-02 (PREPARED — deploys in evening low-PV window)
+## [1.13.0] - 2026-08-02
 
 ### Fixed — write-path safety & data integrity (review 2026-08-02)
 
-NOT yet deployed: written + compiled + unit-tested at midday peak (61kW), to be
-built & deployed together in a low-production window (write path touches active
-OV protection).
+Written + unit-tested at midday peak; deployed 2026-08-02 14:34 (operator
+accepted the ~90s OV-blind restart window at ~59kW). Verified live post-deploy:
+4/4 inverters online, controller reads full PV, WRITE enabled, no anomalies.
 
 - **HIGH-4** — command TTL + last-wins: only the newest intent per inverter
   executes; a queued throttle superseded by a newer command, or one that sat
