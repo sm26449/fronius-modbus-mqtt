@@ -7,6 +7,8 @@ Architecture:
 """
 
 import time
+import os
+import json
 import logging
 import queue
 import threading
@@ -56,6 +58,11 @@ class PowerLimitCommand:
     ramp_time: int = 0        # WMaxLim_RmpTms (seconds for gradual transition)
     source: str = "mqtt"      # "mqtt" or "auto_revert"
     timestamp: float = field(default_factory=time.time)
+    # L3: rate-limit bypass keys off THIS flag, not the `source` string — an MQTT
+    # payload can forge source="auto_revert"/"shutdown" but cannot set _internal
+    # (never populated from a payload). Only genuinely internal writes
+    # (auto-revert, shutdown, dawn restore) bypass the rate limit.
+    _internal: bool = False
 
 
 # Suppress pymodbus exception logging
@@ -433,6 +440,9 @@ class DevicePoller(threading.Thread):
         self._last_valid_data: Dict[int, Dict] = {}   # {unit_id: last non-corrupted data}
         self._corruption_count: Dict[int, int] = {}     # {unit_id: corruption count}
         self._last_status: Dict[int, int] = {}           # {unit_id: last status_code}
+        self._mppt_producing_count: Dict[int, int] = {}  # M9: consecutive MPPT>100 cycles
+        self._last_lifetime_energy: Dict[int, float] = {}  # L4: monotonicity guard
+        self._last_lifetime_ts: Dict[int, float] = {}
         self._night_skip_logged = False                  # Log night skip message once
 
         # Write command processing
@@ -448,6 +458,18 @@ class DevicePoller(threading.Thread):
         self._auto_revert_timers: Dict[int, float] = {}   # Timestamp when to auto-revert
         self._write_count = 0
         self._write_failures = 0
+        # HIGH-4: last-intent timestamp per device. A queued throttle that a
+        # NEWER command for the same device has superseded (or that sat >TTL in
+        # the queue getting rate-limited) must NOT execute after a restore — it
+        # would re-throttle an inverter the OV loop just released. Absolute
+        # register + bursty OV => last intent wins; stale intents are dropped.
+        self._last_intent_ts: Dict[int, float] = {}
+        self._cmd_ttl_s = 90
+        # M4: persist active power limits so a throttle survives a crash/restart
+        # as tracked state (not orphaned at the inverter with no revert clock).
+        self._active_limits_path = os.environ.get(
+            'ACTIVE_LIMITS_PATH', '/app/data/active_limits.json')
+        self._limits_loaded = False
 
     def _runtime_key(self, device_id: int, device_type: str) -> str:
         """Generate unique key for device runtime tracking."""
@@ -734,15 +756,35 @@ class DevicePoller(threading.Thread):
         corruption_detected = False
         reason = ''
 
-        # Strategy 1: MPPT shows production but Model 103 shows all zeros
+        # Strategy 1: MPPT shows production but Model 103 shows all zeros.
+        # M9 guards against INJECTING phantom AC power when the inverter is
+        # genuinely off: if the status says OFF/SLEEPING/STARTING/SHUTTING/
+        # STANDBY, all-zero Model 103 is CORRECT, not corruption — believe it.
+        # And require MPPT>100 for TWO consecutive cycles before overwriting the
+        # zeros, so a single spurious MPPT reading can't fabricate production.
+        INVERTER_OFF_STATES = (1, 2, 3, 6, 8)  # OFF, SLEEPING, STARTING, SHUTTING_DOWN, STANDBY
         model103_all_zero = (
             (data.get('ac_power') is not None and data['ac_power'] == 0) and
             (data.get('dc_power') is not None and data['dc_power'] == 0) and
             (data.get('dc_voltage') is not None and data['dc_voltage'] == 0)
         )
-        if model103_all_zero and mppt_dc_power > 100:
+        mppt_producing = mppt_dc_power > 100
+        if mppt_producing:
+            self._mppt_producing_count[unit_id] = self._mppt_producing_count.get(unit_id, 0) + 1
+        else:
+            self._mppt_producing_count[unit_id] = 0
+        mppt_confirmed = self._mppt_producing_count.get(unit_id, 0) >= 2
+
+        if (model103_all_zero and mppt_confirmed
+                and status_code not in INVERTER_OFF_STATES):
             corruption_detected = True
-            reason = f'Model103 all-zero but MPPT={mppt_dc_power:.0f}W'
+            reason = f'Model103 all-zero but MPPT={mppt_dc_power:.0f}W (2-cycle confirmed)'
+        elif model103_all_zero and mppt_producing and status_code in INVERTER_OFF_STATES:
+            # Off + MPPT residual: do NOT inject. Believe the OFF status.
+            self.log.debug(
+                f"Inverter {unit_id}: MPPT={mppt_dc_power:.0f}W but status "
+                f"{status_code} is OFF/SLEEP — NOT reconciling (no phantom power)"
+            )
 
         # Strategy 2: impossible status_code for time of day
         hour = datetime.now().hour
@@ -879,7 +921,10 @@ class DevicePoller(threading.Thread):
         data['status']['vendor_code'] = vendor_code
         data['status']['vendor_name'], data['status']['vendor_description'] = \
             self.parser.parse_vendor_status(vendor_code)
-        data['is_active'] = data.get('status_code', 0) in self.ACTIVE_STATUS_CODES
+        # M13: is_active is computed AFTER _validate_and_reconcile (below), not
+        # here — reconcile can rewrite status_code (FAULT->prev, or ->SLEEPING at
+        # night), and computing is_active off the raw code left active/St
+        # contradicting each other downstream.
 
         # Parse events — pick the model-specific EvtVnd map (Symo carries the
         # DC-insulation + AFCI bits that the generic 'all' map differs on).
@@ -907,6 +952,10 @@ class DevicePoller(threading.Thread):
         if self.debug_config.validate_data:
             data = self._validate_and_reconcile(data, unit_id)
 
+        # M13: derive is_active from the FINAL (possibly reconciled) status_code
+        # so it never contradicts the published St.
+        data['is_active'] = data.get('status_code', 0) in self.ACTIVE_STATUS_CODES
+
         # Read Model 123 - Immediate Controls (power limit, PF, connection status)
         # Only read every CONTROLS_POLL_INTERVAL seconds (controls don't change often)
         now = time.time()
@@ -923,6 +972,7 @@ class DevicePoller(threading.Thread):
                         'power_limit_win_tms': controls_data.get('power_limit_win_tms'),
                         'power_limit_rvrt_tms': controls_data.get('power_limit_rvrt_tms'),
                         'power_limit_rmp_tms': controls_data.get('power_limit_rmp_tms'),
+                        '_sf_wmax': controls_data.get('_sf_wmax'),  # M6: last good SF
                         'updated_at': now,
                     }
                 self.log.debug(f"Inverter {unit_id}: Controls - "
@@ -952,6 +1002,32 @@ class DevicePoller(threading.Thread):
             prev_name = self.parser.parse_status(prev_status).get('name', '?')
             curr_name = data.get('status', {}).get('name', '?')
             self.log.warning(f"Inverter {unit_id}: {prev_name}({prev_status}) -> {curr_name}({curr_status})")
+
+        # L4: plausibility/monotonicity guard on lifetime_energy — a cumulative
+        # counter that DECREASES (DataManager buffer glitch / counter reset) or
+        # jumps impossibly fast makes any downstream daily-delta go negative or
+        # spike. Drop the bad reading (None = not published) instead of poisoning
+        # energy accounting. Symo max ~20kW => cap the physical rise per interval.
+        le = data.get('lifetime_energy')
+        if le is not None:
+            prev_le = self._last_lifetime_energy.get(unit_id)
+            prev_t = self._last_lifetime_ts.get(unit_id, 0)
+            now_t = time.time()
+            bad = False
+            if prev_le is not None:
+                if le < prev_le:
+                    bad = f'decreased {prev_le}->{le} Wh (counter reset/glitch)'
+                else:
+                    dt_h = max((now_t - prev_t) / 3600.0, 1e-6)
+                    if (le - prev_le) > 25000 * dt_h:  # >25kW avg is impossible
+                        bad = f'jumped +{le - prev_le:.0f} Wh in {dt_h*3600:.0f}s'
+            if bad:
+                self.log.warning(f"Inverter {unit_id}: implausible lifetime_energy "
+                                 f"({bad}) — dropping")
+                data['lifetime_energy'] = None
+            else:
+                self._last_lifetime_energy[unit_id] = le
+                self._last_lifetime_ts[unit_id] = now_t
 
         # Cache last valid data for status recovery during corruption (TTL: 5 minutes)
         if not data.get('_corrupted'):
@@ -1254,6 +1330,11 @@ class DevicePoller(threading.Thread):
 
         try:
             self._command_queue.put_nowait(cmd)
+            # Record newest intent for this device (last-wins supersede check).
+            with self._write_state_lock:
+                prev = self._last_intent_ts.get(cmd.device_id, 0)
+                if cmd.timestamp > prev:
+                    self._last_intent_ts[cmd.device_id] = cmd.timestamp
             self.log.info(
                 f"Inverter {cmd.device_id}: power limit command queued "
                 f"({cmd.limit_pct}%, source={cmd.source})"
@@ -1309,10 +1390,37 @@ class DevicePoller(threading.Thread):
             'timestamp': time.time(),
         }
 
-        # Step 1: Rate limit check (auto_revert/shutdown bypass — safety critical)
+        # Step 0 (HIGH-4): drop stale / superseded intents. Only the NEWEST
+        # command per device may apply (absolute register + bursty OV). A
+        # restore (>=100%) is always safe to apply, so it never expires on TTL;
+        # but even a restore is skipped if a NEWER command exists (that newer
+        # intent wins). This stops a queued throttle from re-throttling an
+        # inverter after the OV loop already released it.
+        with self._write_state_lock:
+            newest = self._last_intent_ts.get(device_id, cmd.timestamp)
+        if cmd.timestamp < newest:
+            result['status'] = 'superseded'
+            result['reason'] = 'a newer command for this device supersedes it'
+            self.log.info(
+                f"Inverter {device_id}: dropping superseded {cmd.limit_pct}% "
+                f"(source={cmd.source}) — newer intent pending"
+            )
+            return result
+        age = time.time() - cmd.timestamp
+        if cmd.limit_pct < 100.0 and age > self._cmd_ttl_s:
+            result['status'] = 'expired'
+            result['reason'] = f'command {int(age)}s old (> {self._cmd_ttl_s}s TTL)'
+            self.log.warning(
+                f"Inverter {device_id}: dropping EXPIRED throttle {cmd.limit_pct}% "
+                f"({int(age)}s old) — OV loop will re-emit if still needed"
+            )
+            return result
+
+        # Step 1: Rate limit check (internal writes bypass — safety critical).
+        # L3: bypass keys off cmd._internal (unforgeable), not the source string.
         now = time.time()
         last_write = self._last_write_time.get(device_id, 0)
-        if cmd.source not in ("auto_revert", "shutdown") and now - last_write < self.write_config.rate_limit_seconds:
+        if not cmd._internal and now - last_write < self.write_config.rate_limit_seconds:
             remaining = int(self.write_config.rate_limit_seconds - (now - last_write))
             self.log.warning(
                 f"Inverter {device_id}: write rate limited — "
@@ -1365,6 +1473,30 @@ class DevicePoller(threading.Thread):
         result['before_pct'] = before_pct
         result['before_enabled'] = before_ena == 1
         result['scale_factor'] = sf_wmax
+
+        # M6: The DataManager is documented to return buffer garbage. A corrupt
+        # WMaxLimPct_SF turns Step 6's `limit / 10**sf` into a wildly wrong raw
+        # register value (e.g. SF=+3 => write 100000x too small => a "100%"
+        # command clamps the inverter to near-0). Reject writes on an
+        # implausible SF (Fronius uses only {-2,-1,0}) or one that diverges from
+        # the last good SF we saw for this device.
+        VALID_SF = (-2, -1, 0)
+        last_good_sf = None
+        with self._write_state_lock:
+            lc = self._latest_controls.get(device_id)
+            if lc:
+                last_good_sf = lc.get('_sf_wmax')
+        if sf_wmax not in VALID_SF or (last_good_sf is not None
+                                       and sf_wmax != last_good_sf):
+            result['status'] = 'error'
+            result['reason'] = (f'implausible WMaxLimPct_SF={sf_wmax} '
+                                f'(valid {VALID_SF}, last good {last_good_sf}) '
+                                '— likely DataManager buffer corruption')
+            self.log.error(
+                f"Inverter {device_id}: ABORT write — implausible SF={sf_wmax} "
+                f"(last good {last_good_sf}); not risking a miscalculated limit"
+            )
+            return result
 
         self.log.warning(
             f"Inverter {device_id}: pre-write state — "
@@ -1484,12 +1616,57 @@ class DevicePoller(threading.Thread):
                         )
                     else:
                         self._auto_revert_timers.pop(device_id, None)
+            # Persist the mutated limit set so a crash doesn't orphan it (M4).
+            self._persist_active_limits()
         # 'unverified' → leave _active_limits / timers untouched (PENDING).
 
         # Step 11: Force controls re-read on next poll cycle
         self._last_controls_read.pop(device_id, None)
 
         return result
+
+    def _persist_active_limits(self):
+        """Write _active_limits to disk (M4). Best-effort, atomic. Called after
+        every mutation so a crash/restart doesn't orphan a throttle."""
+        try:
+            with self._write_state_lock:
+                snapshot = {str(k): v for k, v in self._active_limits.items()}
+            tmp = self._active_limits_path + '.tmp'
+            with open(tmp, 'w') as f:
+                json.dump(snapshot, f)
+            os.replace(tmp, self._active_limits_path)
+        except Exception as e:
+            self.log.warning(f"Could not persist active limits: {e}")
+
+    def _load_persisted_limits(self):
+        """At startup, reload active limits persisted before a crash (M4). Each
+        recovered limit gets a LONG safety auto-revert armed so an orphaned
+        throttle is released even if the OV node (its normal revert clock) never
+        comes back — the exact 'stuck at 70% forever after a crash' gap."""
+        self._limits_loaded = True
+        try:
+            if not os.path.exists(self._active_limits_path):
+                return
+            with open(self._active_limits_path) as f:
+                saved = json.load(f)
+        except Exception as e:
+            self.log.warning(f"Could not load persisted limits: {e}")
+            return
+        if not saved:
+            return
+        # Safety net timeout: 4h (or the configured auto_revert, whichever larger).
+        safety = max(14400, getattr(self.write_config, 'auto_revert_seconds', 0) or 0)
+        now = time.time()
+        with self._write_state_lock:
+            for k, v in saved.items():
+                dev = int(k)
+                self._active_limits[dev] = v
+                self._auto_revert_timers[dev] = now + safety
+        self.log.warning(
+            f"M4: recovered {len(saved)} active power limit(s) from disk "
+            f"{list(saved.keys())} — safety auto-revert armed in {safety}s "
+            "(OV loop will normally revert sooner)"
+        )
 
     def _check_auto_revert(self):
         """Check for expired auto-revert timers and queue restore commands."""
@@ -1516,6 +1693,7 @@ class DevicePoller(threading.Thread):
                 device_id=device_id,
                 limit_pct=100.0,
                 source="auto_revert",
+                _internal=True,
             )
             try:
                 self._command_queue.put_nowait(cmd)
@@ -1649,6 +1827,8 @@ class DevicePoller(threading.Thread):
 
     def run(self):
         self.running = True
+        if not self._limits_loaded:
+            self._load_persisted_limits()   # M4: recover throttles from a crash
         inv_ids = [inv['device_id'] for inv in self.inverters]
         meter_ids = [m['device_id'] for m in self.meters]
         self.log.info(f"DevicePoller: started for inverters {inv_ids}, meters {meter_ids}")
@@ -1715,10 +1895,39 @@ class DevicePoller(threading.Thread):
                 if not self._night_skip_logged:
                     self.log.info("DevicePoller: Skipping inverter polling (night mode — DataManager returns stale data)")
                     self._night_skip_logged = True
+                    # M8: a power limit still active at dusk can't be written
+                    # while polling is skipped — flag it so the operator knows
+                    # the restore is pending until dawn.
+                    with self._write_state_lock:
+                        pending = list(self._active_limits.keys())
+                    if pending:
+                        self.log.warning(
+                            f"DevicePoller: entering night-skip with ACTIVE power "
+                            f"limits on inverters {pending} — restore deferred to dawn"
+                        )
             else:
                 if self._night_skip_logged:
                     self.log.info("DevicePoller: Resuming inverter polling (dawn detected)")
                     self._night_skip_logged = False
+                    # M8: at dawn, re-emit a restore for every still-active limit
+                    # so a throttle set the previous day (and un-writable
+                    # overnight) doesn't silently persist into the new day.
+                    with self._write_state_lock:
+                        stale_limits = list(self._active_limits.keys())
+                    for dev_id in stale_limits:
+                        self.log.warning(
+                            f"DevicePoller: dawn — re-emitting restore for inverter "
+                            f"{dev_id} (limit active overnight)"
+                        )
+                        cmd = PowerLimitCommand(device_id=dev_id, limit_pct=100.0,
+                                                source="auto_revert", _internal=True)
+                        with self._write_state_lock:
+                            self._last_intent_ts[dev_id] = cmd.timestamp
+                        try:
+                            self._command_queue.put_nowait(cmd)
+                        except queue.Full:
+                            self.log.error(
+                                f"Inverter {dev_id}: dawn restore failed — queue full")
 
             # Poll all inverters (unless night skip)
             if not skip_inverters:
@@ -1783,6 +1992,7 @@ class DevicePoller(threading.Thread):
                 device_id=device_id,
                 limit_pct=100.0,
                 source="shutdown",
+                _internal=True,
             )
             result = self._execute_power_limit_write(cmd)
             if result.get('status') == 'success':

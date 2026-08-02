@@ -5,6 +5,49 @@ All notable changes to Fronius Modbus MQTT will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.13.0] - 2026-08-02 (PREPARED — deploys in evening low-PV window)
+
+### Fixed — write-path safety & data integrity (review 2026-08-02)
+
+NOT yet deployed: written + compiled + unit-tested at midday peak (61kW), to be
+built & deployed together in a low-production window (write path touches active
+OV protection).
+
+- **HIGH-4** — command TTL + last-wins: only the newest intent per inverter
+  executes; a queued throttle superseded by a newer command, or one that sat
+  >90s getting rate-limited, is dropped (status superseded/expired) instead of
+  re-throttling an inverter the OV loop just released.
+- **M4** — active power limits persisted to /app/data + reloaded at boot with a
+  4h safety auto-revert, so a throttle no longer becomes an orphan (stuck %
+  forever) after a crash.
+- **M6** — WMaxLimPct scale factor validated ({-2,-1,0} + last-good) before a
+  write; a corrupt SF from the DataManager can no longer miscalculate the raw
+  limit register (a "100%" command clamping to near-0).
+- **M8** — at dawn, re-emit a restore for any limit left active overnight
+  (un-writable during night-skip); warn at dusk if a limit is pending.
+- **M9/M13** — reconciliation no longer INJECTS phantom AC power when the
+  inverter status says OFF/SLEEPING/STARTING/SHUTTING/STANDBY, and requires 2
+  consecutive MPPT>100 cycles before overwriting zeros; is_active is derived
+  AFTER reconciliation so it never contradicts the published status.
+  (M10 full solar-elevation gate deferred — needs lat/lon config; the status
+  guard covers the phantom-injection risk.)
+- **L2** — retained MQTT commands rejected (no unsolicited re-execution).
+- **L3** — rate-limit bypass keys off an unforgeable _internal flag, not the
+  payload's source string.
+- **L4** — lifetime_energy monotonicity guard (drop decreases / impossible
+  jumps) so downstream daily-energy deltas can't go negative.
+- **L5** — publish a cmd/result on the 'poller not ready' path.
+- **L6** — events topic retained + deduped both ways (truthful retained value).
+
+### Deferred (documented, not lost)
+- **HIGH-6** (wire publish_inverter_offline): NR grid-controller sums per-
+  inverter W with NO per-inverter staleness — zeroing an offline-but-wedged
+  inverter would under-read. Correct fix is likely NR-side (per-inverter
+  staleness on the W sum); a control-input design decision, not a blind wire.
+  Method ported into repo (M24), uncalled.
+- **L1** (wake poller in sleep — night-only), **L7** (abort discovery on
+  SIGTERM — mitigated by stop_grace 60s), **M10-full** (solar elevation).
+
 ## [1.12.0] - 2026-08-02
 
 ### Fixed — reliability & observability (review 2026-08-02, safe MEDIUMs)

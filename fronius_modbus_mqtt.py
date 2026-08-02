@@ -187,6 +187,12 @@ class FroniusModbusMQTT:
 
         if not self.modbus_client or not self.modbus_client.device_poller:
             self.log.warning(f"MQTT command '{command}' rejected — poller not ready")
+            if self.mqtt_publisher:
+                # L5: publish the rejection (like every sibling branch) so the OV
+                # node isn't left waiting silently for a result that never comes.
+                self.mqtt_publisher.publish_command_result(device_id, command, {
+                    'status': 'rejected', 'reason': 'poller not ready'
+                })
             return
 
         try:

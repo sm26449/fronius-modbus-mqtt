@@ -824,14 +824,17 @@ class MQTTPublisher:
             topic = self._build_topic(device_type, device_id, 'active')
             self.publish_if_changed(topic, data['is_active'])
 
-        # Events (always publish if any exist, don't retain)
+        # Events: retained + deduped both ways so the retained value is always
+        # truthful (L6). Previously active events were retain=False while the
+        # clear was retain=True, so a late subscriber could see a stale '[]'
+        # while events were actually active, or vice versa.
         if 'events' in data and data['events']:
             topic = self._build_topic(device_type, device_id, 'events')
-            self.publish(topic, data['events'], retain=False)
+            self.publish_if_changed(topic, data['events'], retain=True)
         elif 'events' in data:
             # Clear events if none active
             topic = self._build_topic(device_type, device_id, 'events')
-            self.publish_if_changed(topic, [])
+            self.publish_if_changed(topic, [], retain=True)
 
         # Device info fields
         for field in ['model', 'manufacturer', 'serial_number']:
