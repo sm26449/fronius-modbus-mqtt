@@ -5,6 +5,26 @@ All notable changes to Fronius Modbus MQTT will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.10.0] - 2026-08-02
+
+### Fixed — partial-fleet self-heal (DataManager Modbus wedge)
+
+Incident 2026-08-02: the collector got stuck reading only 1 of 4 inverters
+through the Fronius DataManager. Some unit IDs failed persistently while one
+kept succeeding, so the shared TCP stayed "connected" and the per-device
+backoff never cleared the wedge — the fleet stayed split for ~18h until a
+manual container restart. Downstream, the PV-Stack control loop under-read
+PV, under-exported, and dumped the unaccounted PV into the battery instead
+of selling it.
+
+- `DevicePoller.request_reconnect()` — drops the TCP + clears offline
+  devices' backoff so the next cycle re-reads the whole fleet on a fresh
+  DataManager session (thread-safe: sets an event the poller thread acts on).
+- Partial-fleet watchdog in the 30s stats cycle: after 10 consecutive cycles
+  (~5 min) of `0 < inverters_online < inverters_total`, triggers the
+  reconnect automatically (env `PARTIAL_RECONNECT_CYCLES`, default 10). Only
+  acts with >1 inverter configured.
+
 ## [1.9.0] - 2026-06-22
 
 ### Added

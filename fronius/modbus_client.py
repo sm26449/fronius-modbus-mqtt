@@ -379,6 +379,16 @@ class DevicePoller(threading.Thread):
         # Single connection for all devices
         self.connection = ModbusConnection(modbus_config, parser)
 
+        # Partial-fleet self-heal (incident 2026-08-02): when the DataManager's
+        # Modbus buffer wedges, some unit IDs fail persistently while others
+        # keep succeeding — the shared TCP stays "connected" (the healthy unit
+        # keeps it alive), so a per-device backoff never clears the wedge and
+        # the fleet stays split for hours. The main-loop watchdog sets this
+        # event on sustained partial; the poller thread then drops the TCP and
+        # resets offline devices so the next cycle re-reads the whole fleet
+        # on a fresh DataManager session (what a process restart did manually).
+        self._force_reconnect = threading.Event()
+
         # Track last controls read time per inverter
         self._last_controls_read: Dict[int, float] = {}
 
@@ -560,6 +570,19 @@ class DevicePoller(threading.Thread):
                 state.model_id_verified_at = datetime.now()
 
             self.log.debug(f"{device_type.title()} {unit_id}: model_id verified = {new_model_id}")
+
+    def request_reconnect(self, reason: str = "") -> None:
+        """Ask the poller thread to drop the TCP connection and re-read the
+        whole fleet on a fresh DataManager session. Thread-safe (only sets an
+        event + clears offline backoffs; the actual disconnect happens on the
+        poller thread). Called by the partial-fleet watchdog."""
+        self.log.warning(f"DevicePoller: full reconnect requested — {reason}")
+        with self._runtime_lock:
+            for state in self._device_runtime.values():
+                if state.status == "offline":
+                    state.consecutive_errors = 0
+                    state.backoff_until = None
+        self._force_reconnect.set()
 
     def _is_device_in_backoff(self, device_info: Dict, device_type: str) -> bool:
         """Check if device is currently in backoff period."""
@@ -1589,6 +1612,15 @@ class DevicePoller(threading.Thread):
             self.log.info(f"DevicePoller: Night mode enabled ({self.modbus_config.night_start_hour}:00-{self.modbus_config.night_end_hour}:00)")
 
         while self.running:
+            # Partial-fleet self-heal: honour a reconnect request by dropping
+            # the TCP so the next connect() opens a fresh DataManager session
+            # (clears the Modbus buffer wedge). Offline backoffs were already
+            # cleared in request_reconnect() so every device is re-read.
+            if self._force_reconnect.is_set():
+                self._force_reconnect.clear()
+                self.log.warning("DevicePoller: forcing Modbus reconnect (partial-fleet watchdog)")
+                self.connection.disconnect()
+
             # Check if host is available (ping check)
             if self.modbus_config.ping_check_enabled:
                 if not self._check_host_available():

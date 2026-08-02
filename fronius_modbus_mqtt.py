@@ -77,6 +77,14 @@ class FroniusModbusMQTT:
         self.influxdb_publisher = None
         self.monitoring_server = None
 
+        # Partial-fleet watchdog state (incident 2026-08-02): count consecutive
+        # 30s stat cycles where the collector reads only part of the inverter
+        # fleet, and force a full Modbus reconnect once it persists.
+        self._partial_cycles = 0
+        # 10 cycles × 30s = 5 min of sustained partial before self-heal.
+        self._partial_cycles_for_reconnect = int(
+            os.environ.get('PARTIAL_RECONNECT_CYCLES', '10'))
+
         # Setup signal handlers
         signal.signal(signal.SIGINT, self._signal_handler)
         signal.signal(signal.SIGTERM, self._signal_handler)
@@ -484,6 +492,36 @@ class FroniusModbusMQTT:
                 )
             else:
                 self.log.debug(f"Unexpected runtime key format: {key}")
+
+        # Partial-fleet self-heal watchdog: some-but-not-all inverters online
+        # means the DataManager buffer wedged (incident 2026-08-02). Force a
+        # full reconnect after it persists, instead of waiting for a human to
+        # restart the container. Only acts when >1 inverter is configured
+        # (a genuine partial is impossible with a single device).
+        self._partial_fleet_watchdog(stats)
+
+    def _partial_fleet_watchdog(self, stats: dict):
+        """Force a full Modbus reconnect on sustained partial inverter reads."""
+        poller = self.modbus_client.device_poller if self.modbus_client else None
+        if not poller:
+            return
+        total = stats.get('inverter_total', 0)
+        online = stats.get('inverter_online', 0)
+        is_partial = total > 1 and 0 < online < total
+        if is_partial:
+            self._partial_cycles += 1
+            self.log.warning(
+                f"Partial inverter fleet: {online}/{total} online "
+                f"(cycle {self._partial_cycles}/{self._partial_cycles_for_reconnect})"
+            )
+            if self._partial_cycles >= self._partial_cycles_for_reconnect:
+                poller.request_reconnect(
+                    f"{online}/{total} inverters online for "
+                    f"{self._partial_cycles} cycles"
+                )
+                self._partial_cycles = 0
+        else:
+            self._partial_cycles = 0
 
     def _main_loop(self):
         """Main loop - just keeps the app running while threads poll"""
