@@ -290,7 +290,8 @@ class MQTTPublisher:
 
     def __init__(self, config: MQTTConfig, publish_mode: str = 'changed',
                  command_callback: Callable = None,
-                 write_config: WriteConfig = None):
+                 write_config: WriteConfig = None,
+                 heartbeat_interval: int = 0):
         """
         Initialize MQTT publisher.
 
@@ -299,14 +300,21 @@ class MQTTPublisher:
             publish_mode: 'changed' (only publish changes) or 'all' (always publish)
             command_callback: Callback for incoming commands (device_id, command, payload)
             write_config: Write configuration (for command topic suffix)
+            heartbeat_interval: In 'changed' mode, force a republish of values
+                whose last publish is older than this many seconds (0 = off).
+                Downstream freshness watchdogs (NR policy controllers) treat
+                topic silence as a dead signal; sleeping inverters otherwise
+                sit on an unchanged 0.0 W all night and go "stale".
         """
         self.config = config
         self.publish_mode = publish_mode
+        self.heartbeat_interval = heartbeat_interval
         self._command_callback = command_callback
         self._cmd_suffix = write_config.command_topic_suffix if write_config else "cmd"
         self.client: mqtt.Client = None
         self._connected = threading.Event()
         self.last_values: Dict[str, Any] = {}
+        self.last_publish_ts: Dict[str, float] = {}
         self.lock = threading.Lock()
         self.log = get_logger()
 
@@ -634,6 +642,13 @@ class MQTTPublisher:
             if self.last_values[topic] != value:
                 return True
 
+            # Heartbeat: unchanged value, but the last publish is old enough
+            # that downstream freshness watchdogs would flag the topic stale.
+            if self.heartbeat_interval and (
+                    time.monotonic() - self.last_publish_ts.get(topic, 0.0)
+                    >= self.heartbeat_interval):
+                return True
+
             return False
 
     def _confirm_publish(self, topic: str, value: Any):
@@ -647,6 +662,7 @@ class MQTTPublisher:
                 self.last_values[topic] = round(value, 3)
             else:
                 self.last_values[topic] = value
+            self.last_publish_ts[topic] = time.monotonic()
 
     def _publish(self, topic: str, payload: str, retain: bool = None) -> bool:
         """

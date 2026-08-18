@@ -256,6 +256,10 @@ class GeneralConfig:
     log_file: str = ""
     poll_interval: int = 5
     publish_mode: str = "changed"  # 'changed' or 'all'
+    heartbeat_interval: int = 0    # seconds; in 'changed' mode, force a republish of
+                                   # unchanged values older than this (0 = disabled).
+                                   # Keeps downstream freshness watchdogs honest when
+                                   # values sit still (inverters asleep at night).
 
     def __post_init__(self):
         valid_levels = ('DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL')
@@ -269,6 +273,8 @@ class GeneralConfig:
             raise ConfigValidationError(
                 f"general.publish_mode={self.publish_mode!r} must be 'changed' or 'all'"
             )
+        if self.heartbeat_interval:
+            _validate_range(self.heartbeat_interval, "general.heartbeat_interval", 10, 3600)
 
 
 class ConfigLoader:
@@ -342,7 +348,8 @@ class ConfigLoader:
             log_level=_env_get('LOG_LEVEL', gen.get('log_level') or 'INFO'),
             log_file=_env_get('LOG_FILE', gen.get('log_file') or ''),
             poll_interval=_env_get('POLL_INTERVAL', gen.get('poll_interval') or 5, int),
-            publish_mode=_env_get('PUBLISH_MODE', gen.get('publish_mode') or 'changed')
+            publish_mode=_env_get('PUBLISH_MODE', gen.get('publish_mode') or 'changed'),
+            heartbeat_interval=_env_get('HEARTBEAT_INTERVAL', gen.get('heartbeat_interval') or 0, int)
         )
 
         # Parse modbus settings (required - from env or yaml)

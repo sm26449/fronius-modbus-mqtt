@@ -5,6 +5,38 @@ All notable changes to Fronius Modbus MQTT will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.14.0] - 2026-08-18
+
+### Added — night inverter keep-alive (wires HIGH-6, night-gated)
+
+- `_publish_night_zeros()`: during the night window (night_mode +
+  night_skip_inverters), the app republishes honest zeros for every
+  configured inverter's instantaneous fields via the previously-uncalled
+  `publish_inverter_offline` — from the 30s main-loop tick AND from the
+  Modbus startup-retry loop, so it works even when the DataManager itself
+  is powered down overnight (this site) and the process sits in a
+  connect-retry/restart loop. Dedup + heartbeat pacing decide what
+  actually hits the broker. Strictly night-gated: the HIGH-6 concern
+  (zeroing a wedged-but-producing inverter under-reads PV) only applies
+  in daylight, when this never runs; a real daytime outage still goes
+  silent → downstream STALE_DATA stays meaningful.
+
+### Added — MQTT heartbeat republish (`general.heartbeat_interval`)
+
+- In `changed` mode, unchanged values are now force-republished once
+  their last successful publish is older than `heartbeat_interval`
+  seconds (`HEARTBEAT_INTERVAL` env; 0 = off, range 10–3600; measured
+  with a monotonic clock from the last publish, per topic). MQTT only —
+  the InfluxDB path keeps pure change detection.
+- Why: downstream freshness watchdogs treat topic silence as a dead
+  signal. Sleeping inverters sit on an unchanged 0.0 W all night, so the
+  NR DVCC controller (staleSec=120) flagged PV stale and reported
+  STALE_DATA every night ~20:30→07:00 (verified 21 days in InfluxDB),
+  masking NO_PV and leaving the night charge ceiling at min(CCL, 420 A)
+  instead of 0. A real daytime collector outage was indistinguishable
+  from ordinary night. Mirrors the seplos collector's ~60 s uptime
+  heartbeat design.
+
 ## [1.13.0] - 2026-08-02
 
 ### Fixed — write-path safety & data integrity (review 2026-08-02)

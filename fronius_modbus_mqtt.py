@@ -35,7 +35,7 @@ from fronius import (
     MQTTPublisher,
     InfluxDBPublisher,
 )
-from fronius.modbus_client import PowerLimitCommand
+from fronius.modbus_client import PowerLimitCommand, is_night_time
 
 
 class FroniusModbusMQTT:
@@ -267,6 +267,33 @@ class FroniusModbusMQTT:
         if self.mqtt_publisher:
             self.mqtt_publisher.publish_command_result(device_id, command, result)
 
+    def _publish_night_zeros(self):
+        """Keep inverter MQTT state alive while polling is skipped at night.
+
+        During the night window inverter polling is deliberately skipped
+        (night_skip_inverters) and on this site the DataManager itself powers
+        down, so no Modbus path exists at all. The collector still owns the
+        truth "inverters asleep = 0 W" and must keep saying it: downstream
+        freshness watchdogs (NR DVCC/grid controllers, staleSec=120) otherwise
+        flag PV stale every night, masking NO_PV and making a real daytime
+        outage indistinguishable from ordinary night (STALE_DATA 20:30-07:00,
+        verified over 21 days in InfluxDB).
+
+        Emission is idempotent: publish_inverter_offline uses
+        publish_if_changed, so dedup + heartbeat pacing (heartbeat_interval)
+        decide what actually hits the broker. Strictly night-gated — the
+        HIGH-6 concern (zeroing a wedged-but-producing inverter would
+        under-read PV) only applies in daylight, when this never runs.
+        """
+        mb = self.config.modbus
+        if not (self.mqtt_publisher and mb.night_mode_enabled
+                and mb.night_skip_inverters):
+            return
+        if not is_night_time(mb.night_start_hour, mb.night_end_hour):
+            return
+        for inv_id in self.config.devices.inverters:
+            self.mqtt_publisher.publish_inverter_offline(str(inv_id))
+
     def _init_modbus(self) -> bool:
         """Initialize Modbus client and connect with retry logic"""
         self.modbus_client = FroniusModbusClient(
@@ -288,6 +315,11 @@ class FroniusModbusMQTT:
         for attempt in range(1, max_attempts + 1):
             if self.modbus_client.connect():
                 return True
+
+            # DataManager asleep at night: keep the retained inverter state
+            # fresh even though we can't connect (and will eventually exit(1)
+            # into a Docker restart loop until dawn).
+            self._publish_night_zeros()
 
             if attempt < max_attempts:
                 self.log.warning(
@@ -316,6 +348,7 @@ class FroniusModbusMQTT:
             self.config.general.publish_mode,
             command_callback=cmd_callback,
             write_config=self.config.write,
+            heartbeat_interval=self.config.general.heartbeat_interval,
         )
 
         if not self.mqtt_publisher.connect():
@@ -589,6 +622,9 @@ class FroniusModbusMQTT:
                         self._partial_fleet_watchdog(
                             self.modbus_client.device_poller.get_runtime_stats())
                     self._publish_runtime_stats()
+                    # Night-window inverter state keep-alive (no-op in daylight;
+                    # dedup + heartbeat pacing inside publish_if_changed).
+                    self._publish_night_zeros()
                     last_health_write = now
 
             except KeyboardInterrupt:

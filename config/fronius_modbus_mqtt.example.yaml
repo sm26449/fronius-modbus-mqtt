@@ -7,6 +7,10 @@ general:
   log_file: "/app/logs/fronius.log"  # Log file path (becomes inverter.log or meter.log)
   poll_interval: 5             # Seconds between polling cycles
   publish_mode: changed        # 'changed' = only publish changes, 'all' = always publish
+  heartbeat_interval: 60       # In 'changed' mode, republish unchanged values older
+                               # than this many seconds (0 = off, range 10-3600).
+                               # Keeps MQTT freshness watchdogs honest when values
+                               # sit still (e.g. inverters asleep at night on 0.0 W).
 
 # Modbus TCP Connection
 # ---------------------
