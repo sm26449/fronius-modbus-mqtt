@@ -6,8 +6,9 @@ LABEL description="Fronius Modbus TCP to MQTT/InfluxDB Bridge"
 
 WORKDIR /app
 
-# Install system dependencies (curl for InfluxDB bucket creation, gosu for privilege drop)
-RUN apt-get update && apt-get install -y --no-install-recommends curl gosu \
+# Install system dependencies (curl for InfluxDB bucket creation, gosu for
+# privilege drop, iputils-ping for the DataManager reachability check)
+RUN apt-get update && apt-get install -y --no-install-recommends curl gosu iputils-ping \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Python dependencies

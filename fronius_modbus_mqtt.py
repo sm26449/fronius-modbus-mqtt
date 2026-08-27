@@ -35,7 +35,7 @@ from fronius import (
     MQTTPublisher,
     InfluxDBPublisher,
 )
-from fronius.modbus_client import PowerLimitCommand, is_night_time
+from fronius.modbus_client import PowerLimitCommand, is_night_time, ping_host
 
 
 class FroniusModbusMQTT:
@@ -294,6 +294,62 @@ class FroniusModbusMQTT:
         for inv_id in self.config.devices.inverters:
             self.mqtt_publisher.publish_inverter_offline(str(inv_id))
 
+    def _publish_daytime_outage_state(self):
+        """Zero phantom production when the DataManager is unreachable in daylight.
+
+        The 2026-08-27 grid outage: contactor open, site on essential-only
+        (MultiPlus), DataManager dark — yet the retained inverter topics kept
+        serving the last pre-outage read (W=2214, St=4, runtime online), so
+        EPF/dashboard showed phantom production for the whole outage. The night
+        path (_publish_night_zeros) is deliberately night-gated, so nothing
+        owned this state in daylight.
+
+        Two tiers, per the HIGH-6 concern (never zero a wedged-but-producing
+        inverter):
+        - Host fails PING for consecutive_failures_for_sleep cycles → true
+          outage: zero flow fields + St=OFF (publish_inverter_unreachable).
+          Only the ping path can clear host_reachable, so with ping checks
+          disabled this tier never fires.
+        - Modbus down but host pings (wedge) → runtime/status offline only,
+          handled poller-side by mark_fleet_offline + _publish_runtime_stats;
+          nothing to do here.
+        Idempotent via publish_if_changed; recovery is the normal data path.
+        """
+        mb = self.config.modbus
+        if not (self.mqtt_publisher and self.modbus_client
+                and self.modbus_client.device_poller):
+            return
+        if mb.night_mode_enabled and is_night_time(mb.night_start_hour,
+                                                   mb.night_end_hour):
+            return  # night keep-alive owns the topics in this window
+        status = self.modbus_client.device_poller.get_status()
+        if status['host_reachable'] or not status['in_sleep_mode']:
+            return
+        for inv_id in self.config.devices.inverters:
+            self.mqtt_publisher.publish_inverter_unreachable(str(inv_id))
+
+    def _publish_startup_outage_state(self):
+        """Daytime-outage marking for the startup connect-retry loop.
+
+        During a boot-time outage the DevicePoller and the 30s main-loop tick
+        never start — the process sits in _init_modbus retries and then
+        exit(1)s into a Docker restart loop — so _publish_daytime_outage_state
+        can never fire. Same semantics, but the ping probe runs directly here
+        (no poller state exists yet). Ping-gated like the steady-state tier:
+        with ping checks disabled, or while the host still answers ping
+        (Modbus-only wedge), this stays silent.
+        """
+        mb = self.config.modbus
+        if not (self.mqtt_publisher and mb.ping_check_enabled):
+            return
+        if mb.night_mode_enabled and is_night_time(mb.night_start_hour,
+                                                   mb.night_end_hour):
+            return
+        if ping_host(mb.host, timeout=2):
+            return
+        for inv_id in self.config.devices.inverters:
+            self.mqtt_publisher.publish_inverter_unreachable(str(inv_id))
+
     def _init_modbus(self) -> bool:
         """Initialize Modbus client and connect with retry logic"""
         self.modbus_client = FroniusModbusClient(
@@ -320,6 +376,12 @@ class FroniusModbusMQTT:
             # fresh even though we can't connect (and will eventually exit(1)
             # into a Docker restart loop until dawn).
             self._publish_night_zeros()
+            # Daytime outage at boot: the poller/main-loop tick never start
+            # while we sit in this retry loop (then exit(1) into a Docker
+            # restart loop), so the daylight variant must also fire here.
+            # Same ping gate as the steady-state path — no DevicePoller yet,
+            # so probe directly.
+            self._publish_startup_outage_state()
 
             if attempt < max_attempts:
                 self.log.warning(
@@ -625,6 +687,9 @@ class FroniusModbusMQTT:
                     # Night-window inverter state keep-alive (no-op in daylight;
                     # dedup + heartbeat pacing inside publish_if_changed).
                     self._publish_night_zeros()
+                    # Daylight whole-host outage: stop retained topics serving
+                    # phantom production (no-op at night / while host pings).
+                    self._publish_daytime_outage_state()
                     last_health_write = now
 
             except KeyboardInterrupt:

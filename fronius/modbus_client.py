@@ -435,6 +435,10 @@ class DevicePoller(threading.Thread):
         self._in_sleep_mode = False
         self._last_successful_poll = time.time()
         self._sleep_mode_start = None
+        # Last ping-check result. Only the ping path may set this False: a
+        # host that answers ping but refuses Modbus is a wedge (inverters may
+        # still be producing), NOT an outage — consumers must not zero on it.
+        self._host_reachable = True
 
         # Data validation state (for buffer corruption detection)
         self._last_valid_data: Dict[int, Dict] = {}   # {unit_id: last non-corrupted data}
@@ -513,6 +517,23 @@ class DevicePoller(threading.Thread):
         # Note: state reference is safe here because DeviceRuntimeState objects
         # are never replaced in _device_runtime dict, only modified in-place
         self._maybe_verify_model_id(device_info, device_type, state)
+
+    def mark_fleet_offline(self, reason: str):
+        """Mark every tracked device's runtime status offline (whole-host loss).
+
+        Used when the poll loop can't even reach the DataManager (ping or
+        Modbus connect fails for consecutive_failures_for_sleep cycles in
+        daylight) — the per-device failure counters in _update_runtime_on_failure
+        never run in that state, so runtime/status would stay frozen at
+        "online" on MQTT (the 2026-08-27 grid-outage phantom-production bug).
+        Deliberately does NOT touch read_errors/last_seen: nothing was read,
+        nothing errored per-device. Recovery is the normal success path.
+        """
+        with self._runtime_lock:
+            for key, state in self._device_runtime.items():
+                if state.status != "offline":
+                    self.log.warning(f"{key}: marked offline — {reason}")
+                    state.status = "offline"
 
     def _update_runtime_on_failure(self, device_info: Dict, device_type: str):
         """Update runtime state after failed read."""
@@ -713,6 +734,8 @@ class DevicePoller(threading.Thread):
             'meter_online': meter_online,
             'meter_total': meter_total,
             'devices': devices,
+            'host_reachable': self._host_reachable,
+            'in_sleep_mode': self._in_sleep_mode,
         }
 
     def _validate_and_reconcile(self, data: dict, unit_id: int) -> dict:
@@ -1822,7 +1845,8 @@ class DevicePoller(threading.Thread):
             'consecutive_failures': self._consecutive_failures,
             'last_successful_poll': self._last_successful_poll,
             'is_night_time': self._is_night_time(),
-            'connected': self.connection.connected if self.connection else False
+            'connected': self.connection.connected if self.connection else False,
+            'host_reachable': self._host_reachable,
         }
 
     def run(self):
@@ -1866,16 +1890,19 @@ class DevicePoller(threading.Thread):
             # Check if host is available (ping check)
             if self.modbus_config.ping_check_enabled:
                 if not self._check_host_available():
+                    self._host_reachable = False
                     if self._is_night_time():
                         self._enter_sleep_mode("DataManager not responding (night time)")
                     else:
                         self._consecutive_failures += 1
                         if self._consecutive_failures >= self.modbus_config.consecutive_failures_for_sleep:
                             self._enter_sleep_mode(f"DataManager not responding ({self._consecutive_failures} failures)")
+                            self.mark_fleet_offline("DataManager unreachable (ping)")
 
                     # Sleep and retry
                     self._stop_event.wait(self._get_poll_interval())
                     continue
+                self._host_reachable = True
 
             # Try to connect if not connected
             if not self.connection.connected:
@@ -1883,6 +1910,8 @@ class DevicePoller(threading.Thread):
                     self._consecutive_failures += 1
                     if self._consecutive_failures >= self.modbus_config.consecutive_failures_for_sleep:
                         self._enter_sleep_mode(f"Modbus connection failed ({self._consecutive_failures} failures)")
+                        if not self._is_night_time():
+                            self.mark_fleet_offline("Modbus connection lost")
                     self._stop_event.wait(self._get_poll_interval())
                     continue
 

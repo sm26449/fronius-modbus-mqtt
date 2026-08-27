@@ -810,6 +810,38 @@ class MQTTPublisher:
         except Exception as e:
             self.log.error(f"Error publishing inverter {device_id} offline zeros: {e}")
 
+    def publish_inverter_unreachable(self, device_id: str):
+        """Zero an inverter AND flip its SunSpec status to OFF (retained, deduped).
+
+        For a daytime whole-host outage (DataManager doesn't even answer ping —
+        e.g. grid loss opens the contactor and powers it down): the inverters
+        are objectively unreachable and, grid-tied, cannot be producing, so
+        beyond zeroing the flow fields we also publish St=1 (I_STATUS_OFF) and
+        the status description — the dashboard's offline detection keys off
+        fronius/inverter/N/St, which would otherwise stay frozen at 4 (MPPT).
+        Never call this on a mere Modbus wedge (host pings, connect fails):
+        there the inverters may still be producing and only runtime/status may
+        be flipped. Recovery: the next publish_inverter_data overwrites all of
+        it via publish_if_changed.
+        """
+        if not self.client:
+            return
+        self.publish_inverter_offline(device_id)
+        try:
+            self.publish_if_changed(
+                self._build_topic('inverter', device_id, 'St'), 1)
+            self.publish_if_changed(
+                self._build_topic('inverter', device_id, 'status'), 'Off')
+            # Also flip runtime/status directly: in the boot-in-outage path
+            # no DevicePoller exists to feed _publish_runtime_stats, so the
+            # retained value from the previous run would stay "online".
+            # Steady-state the poller publishes the same value — dedup no-op.
+            self.publish_if_changed(
+                self._build_topic('inverter', device_id, 'runtime/status'),
+                'offline', retain=True)
+        except Exception as e:
+            self.log.error(f"Error publishing inverter {device_id} unreachable state: {e}")
+
     def _publish_inverter_data_inner(self, device_id: str, data: Dict):
         """Inner implementation of publish_inverter_data."""
         device_type = 'inverter'

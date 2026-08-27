@@ -5,6 +5,50 @@ All notable changes to Fronius Modbus MQTT will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.15.0] - 2026-08-27
+
+### Added — daytime whole-host outage marking (grid-outage phantom production)
+
+Trigger: the 2026-08-27 morning grid outage. Contactor open, site on
+essential-only (MultiPlus), DataManager dark — yet the retained inverter
+topics kept serving the last pre-outage read (W=2214, St=4,
+runtime/status=online), so EPF/dashboard showed phantom production for
+the whole outage. `_publish_night_zeros` is deliberately night-gated, so
+nothing owned this state in daylight. Two new tiers, both honouring
+HIGH-6 (never zero a wedged-but-producing inverter):
+
+- **Tier 1 — true outage (ping-fail)**: the poller tracks the ping-check
+  result (`_host_reachable`; only the ping path may clear it). When the
+  host fails ping for `consecutive_failures_for_sleep` cycles in
+  daylight, the 30s tick calls the new
+  `publish_inverter_unreachable()` per inverter: zeros the flow fields
+  (existing `publish_inverter_offline`) + publishes `St=1`
+  (I_STATUS_OFF) and `status="Off"` — the dashboard's offline detection
+  keys off `St`, which otherwise stays frozen at 4 (MPPT), plus
+  `runtime/status="offline"` directly (needed at boot, see below; a
+  dedup no-op steady-state). With ping checks disabled this tier never
+  fires. Also wired into the `_init_modbus` startup-retry loop via
+  `_publish_startup_outage_state()` (direct ping probe — no poller
+  exists yet): in a boot-time outage the process sits in connect
+  retries then exit(1)s into a Docker restart loop, exactly like the
+  night case `_publish_night_zeros` already covers there.
+- **Tier 2 — wedge fallback (Modbus down, host pings or ping disabled)**:
+  new `DevicePoller.mark_fleet_offline()` flips every tracked device's
+  runtime status to offline when the loop can't reach the DataManager
+  (ping or connect failure streak in daylight) — the per-device failure
+  counters never run in that state, so `runtime/status` stayed frozen
+  "online". Propagates via the existing `_publish_runtime_stats` 30s
+  path. No zeroing: the inverters may genuinely still be producing.
+
+Both idempotent (`publish_if_changed`); recovery is the normal data
+path. `host_reachable`/`in_sleep_mode` exposed in `get_status()` and
+`get_runtime_stats()`.
+
+- **Dockerfile**: install `iputils-ping` — the slim base had no `ping`
+  binary, which is why `ping_check_enabled` had to be false in the live
+  config (enabled together with this release; verified unprivileged
+  ping works under gosu).
+
 ## [1.14.0] - 2026-08-18
 
 ### Added — night inverter keep-alive (wires HIGH-6, night-gated)
