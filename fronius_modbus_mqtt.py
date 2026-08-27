@@ -35,7 +35,7 @@ from fronius import (
     MQTTPublisher,
     InfluxDBPublisher,
 )
-from fronius.modbus_client import PowerLimitCommand, is_night_time, ping_host
+from fronius.modbus_client import PowerLimitCommand, night_now, ping_host
 
 
 class FroniusModbusMQTT:
@@ -289,7 +289,7 @@ class FroniusModbusMQTT:
         if not (self.mqtt_publisher and mb.night_mode_enabled
                 and mb.night_skip_inverters):
             return
-        if not is_night_time(mb.night_start_hour, mb.night_end_hour):
+        if not night_now(mb):
             return
         for inv_id in self.config.devices.inverters:
             self.mqtt_publisher.publish_inverter_offline(str(inv_id))
@@ -319,8 +319,7 @@ class FroniusModbusMQTT:
         if not (self.mqtt_publisher and self.modbus_client
                 and self.modbus_client.device_poller):
             return
-        if mb.night_mode_enabled and is_night_time(mb.night_start_hour,
-                                                   mb.night_end_hour):
+        if mb.night_mode_enabled and night_now(mb):
             return  # night keep-alive owns the topics in this window
         status = self.modbus_client.device_poller.get_status()
         if status['host_reachable'] or not status['in_sleep_mode']:
@@ -342,8 +341,7 @@ class FroniusModbusMQTT:
         mb = self.config.modbus
         if not (self.mqtt_publisher and mb.ping_check_enabled):
             return
-        if mb.night_mode_enabled and is_night_time(mb.night_start_hour,
-                                                   mb.night_end_hour):
+        if mb.night_mode_enabled and night_now(mb):
             return
         if ping_host(mb.host, timeout=2):
             return
@@ -626,6 +624,27 @@ class FroniusModbusMQTT:
         poller = self.modbus_client.device_poller if self.modbus_client else None
         if not poller:
             return
+        # Dusk/dawn suppression: inverters going to sleep / waking up in a
+        # staggered fashion around the night window is SEASONAL BEHAVIOUR,
+        # not a wedge — the watchdog's exit(1) here caused a restart loop
+        # every late-August dawn (06:03/06:23/06:43) and dusk (7 restarts
+        # 21:07-21:41 on 2026-08-26). Suppress and RESET the counter during
+        # the night window and a ±60 min transition grace, so an overnight
+        # accumulation (1072 cycles on 2026-08-26) can't insta-fire at dawn.
+        mb = self.config.modbus
+        if mb.night_mode_enabled:
+            from datetime import datetime, timedelta
+            now = datetime.now().astimezone()
+            grace = timedelta(minutes=60)
+            if (night_now(mb, now) or night_now(mb, now - grace)
+                    or night_now(mb, now + grace)):
+                if self._partial_cycles:
+                    self.log.info(
+                        "Partial-fleet watchdog: suppressed near night window "
+                        f"(counter was {self._partial_cycles}) — dusk/dawn "
+                        "transitions are not a wedge")
+                self._partial_cycles = 0
+                return
         configured = len(self.config.devices.inverters)
         online = stats.get('inverter_online', 0)
         discovered = stats.get('inverter_total', 0)

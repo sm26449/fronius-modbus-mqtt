@@ -151,6 +151,13 @@ class ModbusConfig:
     ping_check_enabled: bool = True          # Check host availability with ping
     consecutive_failures_for_sleep: int = 3  # Enter sleep mode after N failures
     night_skip_inverters: bool = True        # Skip inverter polling at night (meters still polled)
+    # Site coordinates (optional). When BOTH are set, the night window follows
+    # the real sun (sunset+margin .. sunrise+margin) instead of the fixed
+    # hours above — a fixed 21:00-06:00 drifts out of sync across the year
+    # (dawn restart-loops in late August, clipped evening production in June).
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+    night_margin_min: int = 30               # window margin past sunset/sunrise
 
     def __post_init__(self):
         _validate_range(self.port, "modbus.port", 1, 65535)
@@ -161,6 +168,11 @@ class ModbusConfig:
         _validate_range(self.night_start_hour, "modbus.night_start_hour", 0, 23)
         _validate_range(self.night_end_hour, "modbus.night_end_hour", 0, 23)
         _validate_range(self.consecutive_failures_for_sleep, "modbus.consecutive_failures_for_sleep", 1, 100)
+        if self.latitude is not None:
+            _validate_range(self.latitude, "modbus.latitude", -90, 90)
+        if self.longitude is not None:
+            _validate_range(self.longitude, "modbus.longitude", -180, 180)
+        _validate_range(self.night_margin_min, "modbus.night_margin_min", 0, 180)
 
 
 @dataclass
@@ -372,6 +384,9 @@ class ConfigLoader:
             ping_check_enabled=_env_get('PING_CHECK_ENABLED', mb.get('ping_check_enabled', True), bool),
             consecutive_failures_for_sleep=_env_get('CONSECUTIVE_FAILURES_FOR_SLEEP', mb.get('consecutive_failures_for_sleep', 3), int),
             night_skip_inverters=_env_get('NIGHT_SKIP_INVERTERS', mb.get('night_skip_inverters', True), bool),
+            latitude=_env_get('LATITUDE', mb.get('latitude'), float),
+            longitude=_env_get('LONGITUDE', mb.get('longitude'), float),
+            night_margin_min=_env_get('NIGHT_MARGIN_MIN', mb.get('night_margin_min', 30), int),
         )
 
         # Parse devices settings

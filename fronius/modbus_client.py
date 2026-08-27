@@ -107,18 +107,33 @@ def ping_host(host: str, timeout: int = 2) -> bool:
         return False
 
 
-def is_night_time(start_hour: int = 21, end_hour: int = 6) -> bool:
+def is_night_time(start_hour: int = 21, end_hour: int = 6,
+                  latitude: "float | None" = None,
+                  longitude: "float | None" = None,
+                  margin_min: int = 30,
+                  at: "datetime | None" = None) -> bool:
     """
-    Check if current time is within night hours.
+    Check if a moment is within the night window.
+
+    With site coordinates configured the window follows the real sun
+    (sunset+margin .. sunrise+margin — see fronius/suncalc.py); otherwise
+    the legacy fixed-hour window applies.
 
     Args:
-        start_hour: Hour when night starts (e.g., 21 for 9 PM)
-        end_hour: Hour when night ends (e.g., 6 for 6 AM)
+        start_hour: Hour when night starts (fixed-hour mode)
+        end_hour: Hour when night ends (fixed-hour mode)
+        latitude/longitude: site coordinates (enables solar mode when both set)
+        margin_min: solar-mode margin past sunset/sunrise
+        at: moment to evaluate (default: now)
 
     Returns:
-        True if current time is night time
+        True if the moment is night time
     """
-    current_hour = datetime.now().hour
+    if latitude is not None and longitude is not None:
+        from .suncalc import is_solar_night
+        return is_solar_night(at or datetime.now().astimezone(),
+                              latitude, longitude, margin_min)
+    current_hour = (at or datetime.now()).hour
 
     if start_hour > end_hour:
         # Night spans midnight (e.g., 21:00 - 06:00)
@@ -126,6 +141,16 @@ def is_night_time(start_hour: int = 21, end_hour: int = 6) -> bool:
     else:
         # Night within same day (e.g., 23:00 - 04:00)
         return start_hour <= current_hour < end_hour
+
+
+def night_now(modbus_config, at: "datetime | None" = None) -> bool:
+    """Night check driven by a ModbusConfig (solar when lat/lon set)."""
+    return is_night_time(modbus_config.night_start_hour,
+                         modbus_config.night_end_hour,
+                         getattr(modbus_config, 'latitude', None),
+                         getattr(modbus_config, 'longitude', None),
+                         getattr(modbus_config, 'night_margin_min', 30),
+                         at)
 
 
 class ModbusConnection:
@@ -811,10 +836,7 @@ class DevicePoller(threading.Thread):
 
         # Strategy 2: impossible status_code for time of day
         hour = datetime.now().hour
-        is_night = is_night_time(
-            self.modbus_config.night_start_hour,
-            self.modbus_config.night_end_hour
-        )
+        is_night = night_now(self.modbus_config)
         # Only flag MPPT(4) and THROTTLED(5) — STARTING(3) is legitimate at dawn
         if is_night and status_code in (4, 5):
             corruption_detected = True
@@ -1806,14 +1828,11 @@ class DevicePoller(threading.Thread):
         return ping_host(self.modbus_config.host, timeout=2)
 
     def _is_night_time(self) -> bool:
-        """Check if current time is within configured night hours."""
+        """Check if current time is within the night window (solar-aware)."""
         if not self.modbus_config.night_mode_enabled:
             return False
 
-        return is_night_time(
-            self.modbus_config.night_start_hour,
-            self.modbus_config.night_end_hour
-        )
+        return night_now(self.modbus_config)
 
     def _enter_sleep_mode(self, reason: str):
         """Enter sleep mode - reduce polling frequency."""

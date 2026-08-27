@@ -5,6 +5,32 @@ All notable changes to Fronius Modbus MQTT will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.16.0] - 2026-08-28
+
+### Fixed — dusk/dawn restart loop (solar night window + watchdog suppression)
+
+The partial-fleet watchdog treated seasonal inverter sleep as a process
+fault: `exit(1) for full Docker restart` fired every late-August dawn
+(06:03/06:23/06:43 on 2026-08-26 — the fixed 21:00-06:00 night window
+ends at 06:00 but inverters wake ~06:45) and dusk (7 restarts in
+21:07-21:41 while inverters slept staggered). Two-part fix:
+
+- **`fronius/suncalc.py`** — NOAA sunrise/sunset (stdlib-only, ±minutes).
+  With `modbus.latitude`/`longitude` configured (env `LATITUDE`/
+  `LONGITUDE`), the night window follows the real sun:
+  `sunset+margin .. sunrise+margin` (`night_margin_min`, default 30 —
+  leaning late on purpose: panels produce right up to sunset, inverters
+  need light to boot). Without coordinates the legacy fixed-hour window
+  still applies. All night checks route through the new
+  `night_now(modbus_config)` helper (poller, night zeros, daytime-outage
+  publisher, plausibility validator).
+- **Watchdog suppression**: `_partial_fleet_watchdog` now suppresses AND
+  resets its counter during the night window and a ±60 min transition
+  grace — staggered dusk/dawn sleep is seasonal behaviour, not a wedge,
+  and an overnight counter accumulation (1072 cycles on 2026-08-26) can
+  no longer insta-fire at dawn. Genuine daytime wedges still escalate
+  exactly as before.
+
 ## [1.15.0] - 2026-08-27
 
 ### Added — daytime whole-host outage marking (grid-outage phantom production)
