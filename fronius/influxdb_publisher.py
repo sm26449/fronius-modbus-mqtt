@@ -433,12 +433,15 @@ class InfluxDBPublisher:
                     point = point.field("mppt_num_modules", int(mppt['num_modules']))
                 if 'modules' in mppt:
                     for i, module in enumerate(mppt['modules'], 1):
-                        for mfield in ('dc_current', 'dc_voltage', 'dc_power', 'dc_energy', 'temperature'):
+                        # dc_energy (string{i}_energy, SunSpec DCWH) is no longer
+                        # written — the register value is unreliable (1.16.1);
+                        # consumers integrate string{i}_power instead.
+                        for mfield in ('dc_current', 'dc_voltage', 'dc_power', 'temperature'):
                             if module.get(mfield) is not None:
                                 val = self._safe_float(module[mfield])
                                 if val is not None:
                                     influx_name = {'dc_current': 'current', 'dc_voltage': 'voltage',
-                                                   'dc_power': 'power', 'dc_energy': 'energy',
+                                                   'dc_power': 'power',
                                                    'temperature': 'temperature'}[mfield]
                                     point = point.field(f"string{i}_{influx_name}", val)
 

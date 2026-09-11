@@ -5,6 +5,20 @@ All notable changes to Fronius Modbus MQTT will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.16.1] - 2026-09-11
+
+### Removed — per-string lifetime energy (SunSpec DCWH)
+
+`fronius/inverter/N/mppt/stringX/DCWH` (MQTT), the matching Home Assistant
+discovery entities and the InfluxDB field `string{n}_energy` are no longer
+published. The value read from the inverters is not trustworthy: F1's
+string 1 flipped between ~7.4 and ~15 MWh from one day to the next and F4
+reported an identical counter for both strings. Per-string energy is now
+derived downstream from the `DCW` power integral (pv-stack-ui). On the
+first discovery publish after upgrade the collector clears the retained
+DCWH state and discovery topics so nothing keeps serving a frozen value.
+Historical `string{n}_energy` points remain in InfluxDB untouched.
+
 ## [1.16.0] - 2026-08-28
 
 ### Fixed — dusk/dawn restart loop (solar night window + watchdog suppression)

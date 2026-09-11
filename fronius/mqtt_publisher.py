@@ -150,9 +150,17 @@ HA_MPPT_STRING_SENSORS = [
     ("DCA", "Current", "A", "current", "measurement"),
     ("DCV", "Voltage", "V", "voltage", "measurement"),
     ("DCW", "Power", "W", "power", "measurement"),
-    ("DCWH", "Energy", "Wh", "energy", "total_increasing"),
     ("Tmp", "Temperature", "°C", "temperature", "measurement"),
 ]
+# Per-string sensors we used to publish and now actively retire: their
+# retained state + discovery topics are cleared at discovery time so
+# consumers (HA, pv-stack-ui) stop seeing a frozen value.
+#   DCWH (per-string lifetime Wh, SunSpec model 160): the value the
+#   inverters return is not trustworthy — F1 string 1 flipped between
+#   ~7.4 and ~15 MWh from one day to the next and F4 reported the same
+#   number for both strings (2026-09-10). Energy per string is derived
+#   downstream from the DCW power integral instead. (1.16.1)
+RETIRED_MPPT_STRING_SENSORS = ("DCWH",)
 
 # Runtime monitoring sensors (diagnostic category)
 # Format: (topic_suffix, ha_name, unit, device_class, state_class, icon)
@@ -781,8 +789,9 @@ class MQTTPublisher:
     # retained MQTT topics stop serving a frozen phantom value (e.g. an offline
     # inverter still appearing to export 14 kW). Voltages/frequency/temperatures
     # are NOT zeroed (potentials — plausible at zero flow; 0 V would imply a grid
-    # outage). CUMULATIVE energy (WH, per-string DCWH) is NEVER zeroed — that
-    # would corrupt energy/daily-delta calculations downstream.
+    # outage). CUMULATIVE energy (WH) is NEVER zeroed — that would corrupt
+    # energy/daily-delta calculations downstream. (Per-string DCWH is no
+    # longer published at all — see RETIRED_MPPT_STRING_SENSORS.)
     INVERTER_OFFLINE_ZERO_FIELDS = (
         'W', 'VA', 'VAr', 'A', 'AphA', 'AphB', 'AphC', 'DCA', 'DCW', 'PF',
     )
@@ -911,9 +920,6 @@ class MQTTPublisher:
                     if 'dc_power' in module:
                         topic = self._build_topic(device_type, device_id, f'{base}/DCW')
                         self.publish_if_changed(topic, module['dc_power'])
-                    if 'dc_energy' in module:
-                        topic = self._build_topic(device_type, device_id, f'{base}/DCWH')
-                        self.publish_if_changed(topic, module['dc_energy'])
                     if 'temperature' in module and module['temperature'] is not None:
                         topic = self._build_topic(device_type, device_id, f'{base}/Tmp')
                         self.publish_if_changed(topic, module['temperature'])
@@ -1315,6 +1321,16 @@ class MQTTPublisher:
 
                 if self._publish(discovery_topic, json.dumps(config), retain=True):
                     count += 1
+
+            # Retire sensors we stopped publishing: an empty retained payload
+            # deletes the retained discovery config (HA removes the entity)
+            # and the retained state topic (no frozen last value).
+            for sensor_suffix in RETIRED_MPPT_STRING_SENSORS:
+                sunspec_name = f"mppt/string{string_num}/{sensor_suffix}"
+                safe_name = sunspec_name.lower().replace("/", "_")
+                discovery_topic = f"{HA_DISCOVERY_PREFIX}/sensor/fronius/inverter_{device_id}/{safe_name}/config"
+                self._publish(discovery_topic, "", retain=True)
+                self._publish(self._build_topic('inverter', device_id, sunspec_name), "", retain=True)
 
         self.log.info(f"Published {count} HA discovery configs for inverter {device_id}")
         return count
